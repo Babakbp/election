@@ -1,0 +1,102 @@
+@import "tailwindcss";
+
+/* =========================================================================
+   OFFICIAL PRINT STYLES (A4 Compliant & Panel Elimination)
+   Ensures ONLY the official document is printed without any app UI / panels
+   ========================================================================= */
+
+@media print {
+  /* 1. Eliminate all application panels, navigation, header, buttons and tools */
+  .no-print,
+  .print-hide,
+  header,
+  nav,
+  footer,
+  button,
+  input,
+  select,
+  textarea,
+  [role="dialog"],
+  .fixed {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* 2. Reset document background and typography for pristine paper printing */
+  html, 
+  body, 
+  #root {
+    background-color: #ffffff !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    min-height: auto !important;
+    font-size: 11pt !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* 3. Strip application wrappers */
+  main {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+
+  /* 4. Official Minutes Paper Sheet Formatting */
+  #official-minutes-document {
+    display: block !important;
+    position: relative !important;
+    margin: 0 auto !important;
+    padding: 10mm 12mm !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    box-shadow: none !important;
+    border: 2px solid #000000 !important;
+    border-radius: 0 !important;
+    background-color: #ffffff !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    page-break-inside: avoid !important;
+  }
+
+  #official-minutes-document * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Tables within official minutes */
+  #official-minutes-document table {
+    border-collapse: collapse !important;
+    width: 100% !important;
+    border: 1px solid #000000 !important;
+  }
+
+  #official-minutes-document th,
+  #official-minutes-document td {
+    border: 1px solid #000000 !important;
+    color: #000000 !important;
+    padding: 4px 6px !important;
+  }
+
+  #official-minutes-document thead {
+    background-color: #f1f5f9 !important;
+    font-weight: bold !important;
+  }
+
+  /* Signature & seal boxes */
+  #official-minutes-document .border-2 {
+    border-width: 1.5px !important;
+    border-color: #000000 !important;
+  }
+
+  /* Standard A4 Paper Setup */
+  @page {
+    size: A4 portrait;
+    margin: 8mm 6mm;
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "سامانه مدیریت و شمارش انتخابات حضوری",
+  "description": "سیستم شفاف و امن ثبت‌نام نامزدها، شمارش زنده آرا، ردگیری رویدادها، امضای ناظران و صدور صورتجلسه رسمی",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
