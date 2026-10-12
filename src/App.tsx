@@ -44,6 +44,10 @@ import { VoteCorrectionModal } from './components/VoteCorrectionModal';
 import { ProjectorViewModal } from './components/ProjectorViewModal';
 import { BackupRestoreModal } from './components/BackupRestoreModal';
 import { BallotPaperDesignerTab } from './components/BallotPaperDesignerTab';
+import { SecurityConfigModal } from './components/SecurityConfigModal';
+import { AppLockScreenModal } from './components/AppLockScreenModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { getAppPasswordInfo, getLicenseStatus, CREATOR_NAME, CREATOR_EMAIL } from './utils/license';
 
 // Icons
 import { 
@@ -149,6 +153,9 @@ export default function App() {
   const [correctionCandidate, setCorrectionCandidate] = useState<Candidate | null>(null);
   const [isProjectorOpen, setIsProjectorOpen] = useState(false);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
+  const [isAppLocked, setIsAppLocked] = useState(() => getAppPasswordInfo().isLocked);
+  const [licenseData, setLicenseData] = useState(() => getLicenseStatus());
   const [flashMessage, setFlashMessage] = useState<string | null>(null);
 
   // Sync to local storage
@@ -879,6 +886,7 @@ export default function App() {
         onOpenProjector={() => setIsProjectorOpen(true)}
         onExportExcel={handleExportExcel}
         totalVotes={totalVotes}
+        onOpenSecurity={() => setIsSecurityModalOpen(true)}
       />
 
       {/* Flash Banner if any */}
@@ -1126,14 +1134,30 @@ export default function App() {
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="no-print print:hidden bg-slate-950 border-t border-slate-800 text-slate-500 py-4 px-6 text-xs text-center">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div>
-            سامانه جامع مدیریت و شمارش انتخابات حضوری • طراحی شفاف، امن و راست‌چین (RTL)
+      {/* Footer (Designer & Developer Attribution - Point 2) */}
+      <footer className="no-print print:hidden bg-slate-950 border-t border-slate-800 text-slate-400 py-4 px-6 text-xs text-center">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2 flex-wrap justify-center md:justify-start">
+            <span className="text-slate-400 font-medium">نام طراح و سازنده:</span>
+            <span className="font-bold text-white bg-slate-800/90 px-2.5 py-1 rounded-xl border border-slate-700/80 shadow-sm">
+              بابک بهرامی پور
+            </span>
+            <span className="text-slate-600">•</span>
+            <span className="text-slate-400 font-medium">ایمیل:</span>
+            <a 
+              href="mailto:babakbahramipour@gmail.com" 
+              className="font-mono text-emerald-400 hover:text-emerald-300 hover:underline transition font-semibold"
+              dir="ltr"
+            >
+              babakbahramipour@gmail.com
+            </a>
           </div>
-          <div className="font-mono text-[11px] text-slate-400">
-            شناسه جلسه: {session.id} • دفتر کل ممیزی ضد دستکاری فعال است
+
+          <div className="text-slate-500 font-mono text-[11px] flex items-center gap-2 flex-wrap justify-center">
+            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            <span>شناسه جلسه: {session.id}</span>
+            <span>•</span>
+            <span>دفتر کل ممیزی رمزنگاری‌شده فعال است</span>
           </div>
         </div>
       </footer>
@@ -1176,6 +1200,28 @@ export default function App() {
         }}
         onResetSession={handleResetSession}
       />
+
+      {/* App Lock Screen Modal (Point 3) */}
+      <AppLockScreenModal
+        isLocked={isAppLocked}
+        onUnlocked={() => setIsAppLocked(false)}
+        sessionTitle={session.title}
+      />
+
+      {/* Security, Password & License Modal (Point 3) */}
+      {isSecurityModalOpen && (
+        <ErrorBoundary key={String(isSecurityModalOpen)} fallbackTitle="خطا در باز شدن پنجره تنظیمات امنیتی">
+          <SecurityConfigModal
+            isOpen={isSecurityModalOpen}
+            onClose={() => setIsSecurityModalOpen(false)}
+            onLockAppNow={() => {
+              setIsSecurityModalOpen(false);
+              setIsAppLocked(true);
+            }}
+            onLicenseChanged={() => setLicenseData(getLicenseStatus())}
+          />
+        </ErrorBoundary>
+      )}
     </div>
   );
 }

@@ -35,6 +35,8 @@ import {
   Save
 } from 'lucide-react';
 import { ImageCropperModal } from './ImageCropperModal';
+import { LicenseActivationModal } from './LicenseActivationModal';
+import { getLicenseStatus } from '../utils/license';
 
 interface CandidatesTabProps {
   candidates: Candidate[];
@@ -120,7 +122,22 @@ export const CandidatesTab: React.FC<CandidatesTabProps> = ({
     }
   };
 
+  // License Prompt Modal State
+  const [isLicensePromptOpen, setIsLicensePromptOpen] = useState(false);
+  const [licensePromptAction, setLicensePromptAction] = useState('تعریف و مدیریت نامزدها');
+
+  const checkLicenseOrPrompt = (actionDesc: string): boolean => {
+    const lic = getLicenseStatus();
+    if (!lic.isLicensed) {
+      setLicensePromptAction(actionDesc);
+      setIsLicensePromptOpen(true);
+      return false;
+    }
+    return true;
+  };
+
   const handleOpenEdit = (cand: Candidate) => {
+    if (!checkLicenseOrPrompt('ویرایش مشخصات نامزد')) return;
     setEditingCandidate(cand);
     setEditName(cand.name);
     setEditCandidateNumber(cand.candidateNumber);
@@ -198,6 +215,10 @@ export const CandidatesTab: React.FC<CandidatesTabProps> = ({
   };
 
   const handleCandidateExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!checkLicenseOrPrompt('بارگذاری نامزدها از فایل اکسل')) {
+      e.target.value = '';
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -264,6 +285,10 @@ export const CandidatesTab: React.FC<CandidatesTabProps> = ({
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
+
+    if (!checkLicenseOrPrompt('ثبت و تعریف نامزد جدید در سامانه')) {
+      return;
+    }
 
     if (!name.trim()) {
       setErrorMsg('نام و نام خانوادگی نامزد الزامی است.');
@@ -384,6 +409,37 @@ export const CandidatesTab: React.FC<CandidatesTabProps> = ({
           )}
         </div>
       </div>
+
+      {/* Demo Mode Notice Banner (Point 4) */}
+      {!getLicenseStatus().isLicensed && (
+        <div className="bg-gradient-to-r from-amber-950/70 via-slate-900 to-amber-950/70 border-2 border-amber-500/80 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-slate-200 shadow-xl">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-amber-500/20 text-amber-400 rounded-xl border border-amber-500/40 flex-shrink-0">
+              <Lock className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="font-bold text-sm text-amber-300">
+                نسخه آزمایشی (دمو رایگان) سامانه انتخابات
+              </h4>
+              <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
+                شما می‌توانید از نامزدهای نمونه جهت بررسی و تست سامانه استفاده فرمایید. برای <strong>ثبت و تعریف نامزدهای رسمی، ویرایش مشخصات یا بارگذاری فایل اکسل</strong>، تهیه و فعال‌سازی کلید لایسنس الزامی است.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setLicensePromptAction('ثبت و تعریف نامزدهای رسمی انتخابات');
+              setIsLicensePromptOpen(true);
+            }}
+            className="px-4 py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-amber-950/50 whitespace-nowrap transition active:scale-95"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>خرید و فعال‌سازی لایسنس</span>
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
@@ -892,6 +948,17 @@ export const CandidatesTab: React.FC<CandidatesTabProps> = ({
             ? `انتخاب و تنظیم تصویر «${cropperTargetCandidate.name}» در کادر پرتره`
             : 'انتخاب تصویر از کامپیوتر و تنظیم در کادر رسمی پرتره'
         }
+      />
+
+      {/* License Activation & Purchase Modal (Point 4) */}
+      <LicenseActivationModal
+        isOpen={isLicensePromptOpen}
+        onClose={() => setIsLicensePromptOpen(false)}
+        onActivated={() => {
+          setIsLicensePromptOpen(false);
+          setSuccessMsg('لایسنس رسمی با موفقیت فعال گردید. امکان تعریف و مدیریت کلیه کاندیداها برقرار است.');
+        }}
+        actionTitle={licensePromptAction}
       />
     </div>
   );

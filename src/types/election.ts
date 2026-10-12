@@ -132,8 +132,8 @@ export interface BallotPaperConfig {
   stationNumber: string;
   boxNumber: string;
   instructions: string;
-  layoutStyle: 'CHECKLIST' | 'WRITE_IN' | 'CANDIDATE_CARDS';
-  ballotsPerPage: 1 | 2 | 4;
+  layoutStyle: 'CHECKLIST' | 'WRITE_IN' | 'CANDIDATE_CARDS' | 'INDIVIDUAL_BARCODE_CARDS';
+  ballotsPerPage: 1 | 2 | 4 | 6 | 8;
   showCandidatePhotos: boolean;
   showCandidateCodes: boolean;
   showCandidateAffiliations: boolean;
@@ -144,5 +144,6 @@ export interface BallotPaperConfig {
   totalCopiesToPrint: number; // تعداد کل تعرفه‌های چاپی
   showOfficialStamps: boolean; // محل مهر هیئت اجرایی و نظارت
   showSecurityBorder: boolean; // کادر گیلوش امنیتی
+  barcodeFormat?: 'CAND_CODE' | 'RAW_CODE';
 }
 

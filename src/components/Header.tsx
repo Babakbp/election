@@ -20,6 +20,7 @@ interface HeaderProps {
   onOpenProjector: () => void;
   onExportExcel: () => void;
   totalVotes: number;
+  onOpenSecurity?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -30,6 +31,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenProjector,
   onExportExcel,
   totalVotes,
+  onOpenSecurity,
 }) => {
   const [timeString, setTimeString] = useState<string>('');
 
@@ -172,6 +174,18 @@ export const Header: React.FC<HeaderProps> = ({
               <FileSpreadsheet className="w-4 h-4" />
               <span className="hidden sm:inline">خروجی (.xlsx)</span>
             </button>
+
+            {/* Security & License Settings Button */}
+            {onOpenSecurity && (
+              <button
+                onClick={onOpenSecurity}
+                title="تنظیمات امنیتی، رمز عبور مدیر و فعال‌سازی لایسنس"
+                className="p-2 sm:px-3 sm:py-2 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition"
+              >
+                <ShieldCheck className="w-4 h-4 text-amber-400" />
+                <span className="hidden sm:inline">امنیت و لایسنس</span>
+              </button>
+            )}
 
           </div>
 

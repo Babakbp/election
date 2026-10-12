@@ -19,7 +19,8 @@ import {
   Activity,
   CornerDownLeft,
   Sparkles,
-  RotateCcw
+  RotateCcw,
+  Barcode
 } from 'lucide-react';
 
 interface VotingCounterTabProps {
@@ -49,6 +50,11 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [animatingCandId, setAnimatingCandId] = useState<string | null>(null);
+  const [lastBarcodeScanned, setLastBarcodeScanned] = useState<{
+    candidate: Candidate;
+    timestamp: string;
+  } | null>(null);
+
   const searchInputRef = useRef<HTMLInputElement>(null);
   const voteButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -71,6 +77,33 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
     (c) => toEnglishDigits(c.candidateNumber).startsWith(normalizedQuery) || c.name.includes(searchQuery.trim())
   ) : null);
 
+  // Fast direct barcode voting (triggered by barcode scanner or simulation)
+  const processBarcodeVote = (barcodeRaw: string) => {
+    if (isLocked) return;
+    const clean = toEnglishDigits(barcodeRaw).trim().toUpperCase();
+    if (!clean) return;
+
+    // Support formats: CAND-101, VOTE-CAND-101, VOTE-101, or raw 101
+    const match = clean.match(/(?:CAND|VOTE-CAND|VOTE)?-?(\d+)/);
+    const targetCode = match ? match[1] : clean.replace(/\D/g, '');
+
+    const target = rankedCandidates.find(
+      (c) => toEnglishDigits(c.candidateNumber) === targetCode
+    );
+
+    if (target) {
+      handleIncrement(target.id, 1);
+      setLastBarcodeScanned({
+        candidate: { ...target, votes: target.votes + 1 },
+        timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      });
+      setSearchQuery('');
+      setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 50);
+    }
+  };
+
   // Fast keyboard voting execution
   const executeQuickVote = (cand: Candidate) => {
     if (isLocked) return;
@@ -81,12 +114,19 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
     }, 40);
   };
 
-  // KeyDown on search input
+  // KeyDown on search input (handles both Barcode Scanner Enter and Manual Enter)
   const handleSearchInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
+      const raw = searchQuery.trim().toUpperCase();
+
+      // If barcode scanner sent CAND- prefix or if it's an exact candidate code match
+      if (raw.includes('CAND') || exactMatchedCandidate) {
+        processBarcodeVote(raw);
+        return;
+      }
+
       if (matchedCandidate) {
-        // As requested: first Enter focuses on the vote button!
         voteButtonRef.current?.focus();
       }
     }
@@ -97,7 +137,6 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       if (matchedCandidate) {
-        // Second Enter registers the vote and returns focus to search input!
         executeQuickVote(matchedCandidate);
       }
     }
@@ -305,20 +344,65 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
       <div className="bg-gradient-to-r from-slate-900 via-slate-800/95 to-slate-900 border-2 border-emerald-500/50 rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <span className="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg">
-              <CornerDownLeft className="w-4 h-4" />
+            <span className="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg animate-pulse">
+              <Barcode className="w-4 h-4" />
             </span>
-            <h4 className="font-bold text-sm text-white">ورود و ثبت فوق‌سریع آرا با کد نامزد (کلید Enter)</h4>
+            <div>
+              <h4 className="font-bold text-sm text-white">
+                ثبت آنی رأی با بارکدخوان تعرفه یا کد نامزد (Enter)
+              </h4>
+              <p className="text-[11px] text-slate-400">
+                برگه تعرفه را جلوی بارکدخوان بگیرید تا فوراً ۱ رأی ثبت شود (یا کد را تایپ و اینتر بزنید)
+              </p>
+            </div>
           </div>
-          <div className="text-[11px] text-slate-400 font-mono bg-slate-950/60 px-2.5 py-1 rounded-lg border border-slate-800">
-            گردش کار: تایپ کد نامزد ⬅ کلید <kbd className="bg-slate-700 px-1.5 py-0.5 rounded text-white text-[10px]">Enter</kbd> روی دکمه رأی ⬅ کلید <kbd className="bg-slate-700 px-1.5 py-0.5 rounded text-white text-[10px]">Enter</kbd> ثبت و بازگشت خودکار به تایپ
+          <div className="flex items-center gap-1 text-[11px] font-mono bg-emerald-950/60 text-emerald-300 px-2.5 py-1 rounded-xl border border-emerald-800/60">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+            <span>بارکدخوان آماده اسکن تعرفه (CAND-code)</span>
           </div>
         </div>
 
+        {/* Last Barcode Scan Success Alert */}
+        {lastBarcodeScanned && (
+          <div className="p-3 bg-gradient-to-r from-emerald-950/90 via-slate-900 to-emerald-950/90 border-2 border-emerald-500/80 rounded-2xl flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-1 text-slate-100 shadow-xl">
+            <div className="flex items-center gap-3">
+              <img
+                src={lastBarcodeScanned.candidate.avatarUrl}
+                alt={lastBarcodeScanned.candidate.name}
+                className="w-10 h-10 rounded-xl object-cover border-2 border-emerald-400 shadow-md"
+              />
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-black text-white text-sm">
+                    {lastBarcodeScanned.candidate.name}
+                  </span>
+                  <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 font-mono text-[10px] rounded-lg font-bold">
+                    کد {toPersianDigits(lastBarcodeScanned.candidate.candidateNumber)}
+                  </span>
+                  <span className="text-emerald-400 font-bold text-xs">
+                    ✓ ۱ رأی با موفقیت ثبت شد
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  مجموع آرای نامزد: <strong className="text-emerald-400 font-mono text-xs">{toPersianDigits(lastBarcodeScanned.candidate.votes)}</strong> رأی • زمان اسکن: {lastBarcodeScanned.timestamp}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setLastBarcodeScanned(null)}
+              className="text-slate-400 hover:text-white p-1"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
-          {/* Main fast search input */}
+          {/* Main fast search / barcode input */}
           <div className="relative flex-1">
-            <Search className="w-4 h-4 text-emerald-400 absolute right-3.5 top-3.5" />
+            <Barcode className="w-4 h-4 text-emerald-400 absolute right-3.5 top-3.5" />
             <input
               ref={searchInputRef}
               type="text"
@@ -326,8 +410,8 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={handleSearchInputKeyDown}
-              placeholder="کد نامزد (مثلاً ۱۰۱) یا نام را تایپ کرده و Enter بزنید..."
-              className="w-full bg-slate-950 border-2 border-slate-700 focus:border-emerald-500 rounded-xl pr-10 pl-4 py-2.5 text-sm text-white font-mono placeholder:font-sans placeholder-slate-500 outline-none transition shadow-inner"
+              placeholder="بارکد برگه تعرفه را اسکن کنید (یا کد کاندیدا را تایپ کرده و Enter بزنید)..."
+              className="w-full bg-slate-950 border-2 border-emerald-500/60 focus:border-emerald-400 rounded-xl pr-10 pl-4 py-2.5 text-sm text-white font-mono placeholder:font-sans placeholder-slate-500 outline-none transition shadow-inner"
             />
           </div>
 
@@ -382,11 +466,36 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
             </div>
           ) : (
             <div className="hidden md:flex items-center gap-2 text-xs text-slate-500 bg-slate-950/40 px-3 py-2.5 rounded-xl border border-slate-800/80">
-              <Sparkles className="w-4 h-4 text-slate-600" />
-              <span>با تایپ کد، نامزد شناسایی و آماده ثبت با اینتر می‌شود</span>
+              <Sparkles className="w-4 h-4 text-emerald-400" />
+              <span>بارکدخوان خودکار اسکن کرده و +۱ رأی ثبت می‌کند</span>
             </div>
           )}
         </div>
+
+        {/* Barcode Scanner Simulator Buttons (for convenient testing without physical scanner) */}
+        {!isLocked && rankedCandidates.length > 0 && (
+          <div className="pt-2 border-t border-slate-800/80">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-[10px] text-slate-400">شبیه‌ساز اسکن برگه تعرفه نامزدها:</span>
+              <span className="text-[9px] text-slate-500 font-mono">(کلیک = شبیه‌سازی اسکن با بارکدخوان)</span>
+            </div>
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+              {rankedCandidates.slice(0, 8).map((cand) => (
+                <button
+                  key={cand.id}
+                  type="button"
+                  onClick={() => processBarcodeVote(`CAND-${cand.candidateNumber}`)}
+                  className="px-2 py-1 bg-slate-800 hover:bg-emerald-950/60 text-slate-300 hover:text-emerald-300 border border-slate-700 hover:border-emerald-600 rounded-lg text-[10px] font-semibold flex items-center gap-1 whitespace-nowrap transition"
+                  title={`شبیه‌سازی اسکن بارکد تعرفه ${cand.name}`}
+                >
+                  <Barcode className="w-3 h-3 text-emerald-400" />
+                  <span>{cand.name}</span>
+                  <span className="font-mono text-[9px] text-amber-300 font-bold">({toPersianDigits(cand.candidateNumber)})</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Live audit ticker pill */}
         {recentAuditEvents.length > 0 && (
