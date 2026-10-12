@@ -147,3 +147,19 @@ export interface BallotPaperConfig {
   barcodeFormat?: 'CAND_CODE' | 'RAW_CODE';
 }
 
+export interface ArchivedSession {
+  id: string; // شناسه یکتای بایگانی
+  archivedAt: string; // ISO string
+  persianArchivedDate: string; // نمایش تاریخ و زمان شمسی
+  session: ElectionSession;
+  candidates: Candidate[];
+  auditEvents: AuditEvent[];
+  operators: Operator[];
+  voters?: Voter[];
+  totalVotes: number;
+  winnerNames: string[];
+  integrityChecksum: string;
+  notes?: string;
+  backupPath?: string; // نام یا مسیر پوشه ذخیره شده
+}
+

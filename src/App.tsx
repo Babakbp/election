@@ -11,7 +11,8 @@ import {
   Operator, 
   SessionStatus, 
   TieBreakerRule,
-  Voter
+  Voter,
+  ArchivedSession
 } from './types/election';
 import { 
   createInitialCandidates, 
@@ -47,8 +48,11 @@ import { BallotPaperDesignerTab } from './components/BallotPaperDesignerTab';
 import { SecurityConfigModal } from './components/SecurityConfigModal';
 import { AppLockScreenModal } from './components/AppLockScreenModal';
 import { ManualTallySheetModal } from './components/ManualTallySheetModal';
+import { ElectionGuideModal } from './components/ElectionGuideModal';
+import { SessionsArchiveTab } from './components/SessionsArchiveTab';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { getAppPasswordInfo, getLicenseStatus, CREATOR_NAME, CREATOR_EMAIL } from './utils/license';
+import { archiveSession, getArchivedSessions } from './utils/fileBackupStorage';
 
 // Icons
 import { 
@@ -62,7 +66,9 @@ import {
   UserCheck,
   ShieldCheck,
   UserPlus,
-  Ticket
+  Ticket,
+  HelpCircle,
+  Archive
 } from 'lucide-react';
 
 const STORAGE_KEY_SESSION = 'elections_session_v1';
@@ -147,8 +153,13 @@ export default function App() {
 
   // UI Navigation
   const [activeTab, setActiveTab] = useState<
-    'VOTING' | 'AUDIT' | 'CANDIDATES' | 'VOTERS' | 'BALLOTS' | 'SESSION' | 'MINUTES'
+    'VOTING' | 'AUDIT' | 'CANDIDATES' | 'VOTERS' | 'BALLOTS' | 'SESSION' | 'MINUTES' | 'ARCHIVE'
   >('VOTING');
+
+  // Archive Sessions State
+  const [archivedSessions, setArchivedSessions] = useState<ArchivedSession[]>(() => {
+    return getArchivedSessions();
+  });
 
   // Modals state
   const [correctionCandidate, setCorrectionCandidate] = useState<Candidate | null>(null);
@@ -156,6 +167,7 @@ export default function App() {
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
   const [isManualTallyModalOpen, setIsManualTallyModalOpen] = useState(false);
+  const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
   const [isAppLocked, setIsAppLocked] = useState(() => getAppPasswordInfo().isLocked);
   const [licenseData, setLicenseData] = useState(() => getLicenseStatus());
   const [flashMessage, setFlashMessage] = useState<string | null>(null);
@@ -216,6 +228,50 @@ export default function App() {
       console.error(e);
     }
   }, [isDemoMode]);
+
+  // Automatically request fullscreen when entering main panel (VOTING tab)
+  useEffect(() => {
+    if (activeTab !== 'VOTING') return;
+
+    let isDisposed = false;
+
+    const requestFs = async () => {
+      if (document.fullscreenElement) return;
+      try {
+        if (document.documentElement.requestFullscreen) {
+          await document.documentElement.requestFullscreen();
+        } else if ((document.documentElement as any).webkitRequestFullscreen) {
+          await (document.documentElement as any).webkitRequestFullscreen();
+        }
+      } catch {
+        // If browser blocks without gesture, trigger on first user interaction on the page
+        if (isDisposed) return;
+        const onFirstInteraction = async () => {
+          window.removeEventListener('pointerdown', onFirstInteraction);
+          window.removeEventListener('keydown', onFirstInteraction);
+          if (!document.fullscreenElement && activeTab === 'VOTING') {
+            try {
+              if (document.documentElement.requestFullscreen) {
+                await document.documentElement.requestFullscreen();
+              } else if ((document.documentElement as any).webkitRequestFullscreen) {
+                await (document.documentElement as any).webkitRequestFullscreen();
+              }
+            } catch {
+              // ignore
+            }
+          }
+        };
+        window.addEventListener('pointerdown', onFirstInteraction, { once: true });
+        window.addEventListener('keydown', onFirstInteraction, { once: true });
+      }
+    };
+
+    requestFs();
+
+    return () => {
+      isDisposed = true;
+    };
+  }, [activeTab]);
 
   // Derived statistics
   const totalValidVotes = useMemo(() => {
@@ -676,7 +732,57 @@ export default function App() {
       reason: `قفل نهایی، صدور قطعی صورتجلسه و درج پلمپ الکترونیک با هش ${officialHash}`,
     });
 
-    showFlash('صورتجلسه انتخابات با موفقیت قفل و پلمپ رسمی گردید.');
+    // Automatically archive the completed locked election
+    try {
+      const lockedSession = {
+        ...session,
+        status: 'LOCKED_FINAL' as const,
+        lockedAt: nowIso,
+        finalMinutesHash: officialHash,
+      };
+      await archiveSession(
+        lockedSession,
+        candidates,
+        auditEvents,
+        operators,
+        voters,
+        `قفل نهایی و صدور قطعی صورتجلسه با پلمپ ${officialHash}`
+      );
+      setArchivedSessions(getArchivedSessions());
+    } catch (e) {
+      console.warn('Auto-archive on lock failed:', e);
+    }
+
+    showFlash('صورتجلسه انتخابات با موفقیت قفل گردید و در بایگانی دائمی ذخیره شد.');
+  };
+
+  // Explicitly Archive Current Session
+  const handleArchiveCurrentSession = async (customNotes?: string) => {
+    try {
+      await archiveSession(
+        session,
+        candidates,
+        auditEvents,
+        operators,
+        voters,
+        customNotes || `بایگانی جلسه در تاریخ ${formatJalali(new Date(), true)}`
+      );
+      setArchivedSessions(getArchivedSessions());
+      showFlash(`جلسه «${session.title}» با موفقیت در بایگانی دائمی برنامه ذخیره شد.`);
+    } catch (e) {
+      console.error(e);
+      showFlash('خطا در ذخیره‌سازی جلسه در بایگانی.');
+    }
+  };
+
+  // Restore archived session as active session
+  const handleRestoreArchivedSession = (arch: ArchivedSession) => {
+    setSession(arch.session);
+    setCandidates(arch.candidates);
+    setAuditEvents(arch.auditEvents);
+    setOperators(arch.operators);
+    if (arch.voters) setVoters(arch.voters);
+    showFlash(`جلسه «${arch.session.title}» از بایگانی با موفقیت بارگذاری و فعال شد.`);
   };
 
   // Switch to Real Election (clears all candidates, voters, officers, and operators)
@@ -862,6 +968,16 @@ export default function App() {
 
   // Reset to initial
   const handleResetSession = () => {
+    // Safely auto-archive before wiping if there are votes or customized candidates
+    if (totalVotes > 0 || candidates.length > 0) {
+      try {
+        archiveSession(session, candidates, auditEvents, operators, voters, 'بایگانی خودکار قبل از شروع دوره جدید');
+        setArchivedSessions(getArchivedSessions());
+      } catch (e) {
+        // ignore
+      }
+    }
+
     localStorage.removeItem(STORAGE_KEY_SESSION);
     localStorage.removeItem(STORAGE_KEY_CANDIDATES);
     localStorage.removeItem(STORAGE_KEY_AUDIT);
@@ -873,7 +989,7 @@ export default function App() {
     setVoters(createInitialVoters());
     setOperators(INITIAL_OPERATORS);
     setIsDemoMode(true);
-    showFlash('داده‌ها بازنشانی شدند و جلسه جدید آغاز شد.');
+    showFlash('دوره قبلی در بایگانی ذخیره شد و جلسه جدید با موفقیت آغاز گردید.');
   };
 
   return (
@@ -890,6 +1006,10 @@ export default function App() {
         totalVotes={totalVotes}
         onOpenSecurity={() => setIsSecurityModalOpen(true)}
         onOpenManualTallySheet={() => setIsManualTallyModalOpen(true)}
+        onOpenGuide={() => setIsGuideModalOpen(true)}
+        onOpenBackup={() => setIsBackupModalOpen(true)}
+        onNavigateToArchive={() => setActiveTab('ARCHIVE')}
+        archivedCount={archivedSessions.length}
       />
 
       {/* Flash Banner if any */}
@@ -906,7 +1026,16 @@ export default function App() {
             
             {/* Tab 1: Live Voting */}
             <button
-              onClick={() => setActiveTab('VOTING')}
+              onClick={() => {
+                setActiveTab('VOTING');
+                if (!document.fullscreenElement) {
+                  try {
+                    document.documentElement.requestFullscreen?.();
+                  } catch {
+                    // ignore
+                  }
+                }
+              }}
               className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 whitespace-nowrap transition ${
                 activeTab === 'VOTING'
                   ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/30'
@@ -1011,23 +1140,28 @@ export default function App() {
                 </span>
               )}
             </button>
-          </div>
 
-          {/* Backup Button in Tab Bar */}
-          <div className="hidden sm:flex items-center gap-2 py-2">
+            {/* Tab 8: Sessions Archive (بایگانی جلسات) */}
             <button
-              onClick={() => setIsBackupModalOpen(true)}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-xl border border-slate-700 flex items-center gap-1.5 transition"
+              onClick={() => setActiveTab('ARCHIVE')}
+              className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 whitespace-nowrap transition ${
+                activeTab === 'ARCHIVE'
+                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/30'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
             >
-              <HardDriveDownload className="w-3.5 h-3.5 text-emerald-400" />
-              <span>پشتیبان‌گیری و بازیابی</span>
+              <Archive className="w-4 h-4 text-purple-400" />
+              <span>بایگانی جلسات</span>
+              <span className="font-mono text-xs px-1.5 py-0.2 rounded-md bg-slate-950/40">
+                {toPersianDigits(archivedSessions.length)}
+              </span>
             </button>
           </div>
         </div>
       </nav>
 
       {/* Body Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 print:p-0 print:m-0 print:max-w-none print:w-full">
+      <main className={`flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 print:p-0 print:m-0 print:max-w-none print:w-full ${isManualTallyModalOpen ? 'print:hidden' : ''}`}>
         {/* Readiness Alert when all demo participants have been wiped */}
         {!isDemoMode && operators.length === 0 && (
           <div className="no-print print:hidden mb-6 p-4 rounded-2xl bg-gradient-to-r from-emerald-950/70 to-teal-950/70 border-2 border-emerald-500/60 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in">
@@ -1137,6 +1271,20 @@ export default function App() {
             onExportExcel={handleExportExcel}
           />
         )}
+
+        {activeTab === 'ARCHIVE' && (
+          <SessionsArchiveTab
+            archivedSessions={archivedSessions}
+            onRefreshArchives={() => setArchivedSessions(getArchivedSessions())}
+            onRestoreSession={handleRestoreArchivedSession}
+            currentSession={session}
+            currentCandidates={candidates}
+            currentAuditEvents={auditEvents}
+            currentOperators={operators}
+            currentVoters={voters}
+            onArchiveCurrentSession={() => handleArchiveCurrentSession()}
+          />
+        )}
       </main>
 
       {/* Footer (Designer & Developer Attribution - Point 2) */}
@@ -1196,11 +1344,14 @@ export default function App() {
         session={session}
         candidates={candidates}
         auditEvents={auditEvents}
-        operators={INITIAL_OPERATORS}
-        onRestoreData={({ session: s, candidates: c, auditEvents: a }) => {
+        operators={operators}
+        voters={voters}
+        onRestoreData={({ session: s, candidates: c, auditEvents: a, operators: ops, voters: vts }) => {
           setSession(s);
           setCandidates(c);
           setAuditEvents(a);
+          if (ops && ops.length > 0) setOperators(ops);
+          if (vts && vts.length > 0) setVoters(vts);
           showFlash('بازیابی اطلاعات با موفقیت انجام شد.');
         }}
         onResetSession={handleResetSession}
@@ -1234,6 +1385,32 @@ export default function App() {
         onClose={() => setIsManualTallyModalOpen(false)}
         candidates={candidates}
         session={session}
+      />
+
+      {/* Comprehensive Election Workflow & Tools Guide Modal */}
+      <ElectionGuideModal
+        isOpen={isGuideModalOpen}
+        onClose={() => setIsGuideModalOpen(false)}
+        onNavigateTab={(tab) => {
+          setActiveTab(tab);
+          setIsGuideModalOpen(false);
+        }}
+        onOpenManualTallySheet={() => {
+          setIsGuideModalOpen(false);
+          setIsManualTallyModalOpen(true);
+        }}
+        onOpenProjector={() => {
+          setIsGuideModalOpen(false);
+          setIsProjectorOpen(true);
+        }}
+        onOpenBackup={() => {
+          setIsGuideModalOpen(false);
+          setIsBackupModalOpen(true);
+        }}
+        onOpenSecurity={() => {
+          setIsGuideModalOpen(false);
+          setIsSecurityModalOpen(true);
+        }}
       />
     </div>
   );

@@ -185,6 +185,7 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
 
   return (
     <div className="space-y-6">
+
       {/* Session Locked Notice if applicable */}
       {isLocked && (
         <div className="bg-purple-900/30 border-2 border-purple-500/60 rounded-2xl p-4 flex items-center justify-between gap-4 text-purple-200">

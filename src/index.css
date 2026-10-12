@@ -15,9 +15,7 @@
   button,
   input,
   select,
-  textarea,
-  [role="dialog"],
-  .fixed {
+  textarea {
     display: none !important;
     visibility: hidden !important;
   }
@@ -36,6 +34,7 @@
     font-size: 11pt !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+    overflow: visible !important;
   }
 
   /* 3. Strip application wrappers */
@@ -47,17 +46,52 @@
     background: transparent !important;
   }
 
-  /* 4. Official Minutes and Manual Tally Paper Sheet Formatting */
+  /* When Manual Tally Sheet modal is active, completely hide <main> to eliminate panel view */
+  body:has(#manual-tally-sheet-document) main {
+    display: none !important;
+  }
+
+  /* 4. Reset modal container for Manual Tally Sheet so it prints as a clean full-page document */
+  #manual-tally-modal-overlay {
+    display: block !important;
+    position: static !important;
+    inset: auto !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    min-height: auto !important;
+    overflow: visible !important;
+    visibility: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  #manual-tally-modal-overlay > div {
+    display: block !important;
+    background: #ffffff !important;
+    border: none !important;
+    box-shadow: none !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* 5. Official Minutes and Manual Tally Paper Sheet Formatting */
   #official-minutes-document,
   #manual-tally-sheet-document {
     display: block !important;
     position: relative !important;
     margin: 0 auto !important;
-    padding: 8mm 10mm !important;
+    padding: 6mm 8mm !important;
     max-width: 100% !important;
     width: 100% !important;
     box-shadow: none !important;
-    border: 2px solid #000000 !important;
+    border: 1.5px solid #000000 !important;
     border-radius: 0 !important;
     background-color: #ffffff !important;
     background: #ffffff !important;
@@ -77,6 +111,15 @@
     border-collapse: collapse !important;
     width: 100% !important;
     border: 1.5px solid #000000 !important;
+  }
+
+  #manual-tally-sheet-document thead {
+    display: table-header-group !important;
+  }
+
+  #manual-tally-sheet-document tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
   #official-minutes-document th,
@@ -101,15 +144,15 @@
     border-color: #000000 !important;
   }
 
-  /* Ensure modal backdrop and scrollbars disappear during print */
-  body:has(#manual-tally-sheet-document) {
-    overflow: visible !important;
+  #manual-tally-sheet-document .signatures-container {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
   /* Standard A4 Paper Setup */
   @page {
     size: A4 portrait;
-    margin: 8mm 6mm;
+    margin: 6mm 6mm;
   }
 }
 

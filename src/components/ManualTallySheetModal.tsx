@@ -80,15 +80,18 @@ export const ManualTallySheetModal: React.FC<ManualTallySheetModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto no-print">
+    <div 
+      id="manual-tally-modal-overlay"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto print:static print:inset-auto print:p-0 print:m-0 print:bg-white print:overflow-visible print:block print:z-auto"
+    >
       
       {/* Dialog container */}
       <div 
-        className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-5xl w-full max-h-[92vh] flex flex-col shadow-2xl text-slate-100 overflow-hidden my-auto" 
+        className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-5xl w-full max-h-[92vh] flex flex-col shadow-2xl text-slate-100 overflow-hidden my-auto print:bg-white print:border-none print:shadow-none print:max-w-none print:w-full print:max-h-none print:m-0 print:p-0 print:rounded-none print:overflow-visible print:text-black" 
         dir="rtl"
       >
-        {/* Modal Header */}
-        <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/95 shrink-0">
+        {/* Modal Header (Screen Only) */}
+        <div className="no-print print:hidden px-5 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/95 shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-xl border border-emerald-500/30">
               <Grid3X3 className="w-5 h-5" />
@@ -128,10 +131,10 @@ export const ManualTallySheetModal: React.FC<ManualTallySheetModalProps> = ({
         </div>
 
         {/* Modal Body / Paper Preview */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-950/60">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-950/60 print:p-0 print:m-0 print:bg-white print:overflow-visible">
           
-          {/* Instructions banner */}
-          <div className="mb-4 bg-slate-900/90 border border-slate-800 rounded-xl p-3 text-xs text-slate-300 flex items-start gap-2.5">
+          {/* Instructions banner (Screen Only) */}
+          <div className="no-print print:hidden mb-4 bg-slate-900/90 border border-slate-800 rounded-xl p-3 text-xs text-slate-300 flex items-start gap-2.5">
             <HelpCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
             <div className="leading-relaxed">
               <strong>راهنمای شمارش دستی:</strong> در مواقع قطعی برق یا عدم دسترسی به رایانه، این برگه استاندارد را چاپ کرده و هنگام خواندن هر رأی، یک مربع از خانه‌های شطرنجی کاندیدای مربوطه را علامت یا خط بزنید. هر بلوک شامل ۱۰ خانه بوده و مجموعاً ۵ دسته ده‌تایی (۵۰ رأی در هر ردیف) را پوشش می‌دهد. در پایان، جمع دسته‌ها در ستون «مجموع آرا» ثبت و برگه توسط هیئت اجرایی و نظارت امضا می‌شود.
@@ -141,7 +144,7 @@ export const ManualTallySheetModal: React.FC<ManualTallySheetModalProps> = ({
           {/* Printable White Paper Document */}
           <div 
             id="manual-tally-sheet-document"
-            className="bg-white text-slate-900 p-6 sm:p-8 rounded-xl border border-slate-300 max-w-4xl mx-auto shadow-xl"
+            className="bg-white text-slate-900 p-6 sm:p-8 rounded-xl border border-slate-300 max-w-4xl mx-auto shadow-xl print:p-0 print:m-0 print:border-none print:shadow-none print:rounded-none print:max-w-none print:w-full"
             dir="rtl"
           >
             {/* Header of the paper sheet */}
@@ -337,7 +340,7 @@ export const ManualTallySheetModal: React.FC<ManualTallySheetModalProps> = ({
             </div>
 
             {/* Official Signatures Section */}
-            <div className="mt-4 pt-3 border-t-2 border-black">
+            <div className="signatures-container mt-4 pt-3 border-t-2 border-black break-inside-avoid">
               <div className="text-[11px] font-bold text-black mb-2 flex items-center justify-between">
                 <span>امضای مسئولین و اعضای حاضر در شعبه اخذ رأی جهت تایید صحت شمارش دستی:</span>
                 <span className="text-[10px] text-gray-600 font-normal">
