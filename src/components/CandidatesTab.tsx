@@ -32,7 +32,8 @@ import {
   Pencil,
   Trash2,
   X,
-  Save
+  Save,
+  Grid3X3
 } from 'lucide-react';
 import { ImageCropperModal } from './ImageCropperModal';
 import { LicenseActivationModal } from './LicenseActivationModal';
@@ -47,6 +48,7 @@ interface CandidatesTabProps {
   onUpdateCandidatePhoto?: (candidateId: string, newPhotoUrl: string) => void;
   onUpdateCandidate?: (candidateId: string, updatedData: Partial<Candidate>) => void;
   onDeleteCandidate?: (candidateId: string) => void;
+  onOpenManualTallySheet?: () => void;
 }
 
 export const CandidatesTab: React.FC<CandidatesTabProps> = ({
@@ -58,6 +60,7 @@ export const CandidatesTab: React.FC<CandidatesTabProps> = ({
   onUpdateCandidatePhoto,
   onUpdateCandidate,
   onDeleteCandidate,
+  onOpenManualTallySheet,
 }) => {
   const [name, setName] = useState('');
   const [candidateNumber, setCandidateNumber] = useState('');
@@ -381,6 +384,19 @@ export const CandidatesTab: React.FC<CandidatesTabProps> = ({
                 className="hidden"
               />
             </>
+          )}
+
+          {/* Manual Tally Sheet Button (Grid of 5x10) */}
+          {candidates.length > 0 && onOpenManualTallySheet && (
+            <button
+              type="button"
+              onClick={onOpenManualTallySheet}
+              className="px-3 py-2 bg-teal-600/20 hover:bg-teal-600/30 text-teal-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 border border-teal-500/30 transition shadow-sm"
+              title="چاپ فرم شطرنجی ۵۰ تایی برای شمارش دستی با قلم در شرایط قطع سیستم"
+            >
+              <Grid3X3 className="w-3.5 h-3.5 text-teal-400" />
+              <span>فرم شمارش دستی ۵۰ تایی</span>
+            </button>
           )}
 
           {/* Export Candidates to .xlsx */}

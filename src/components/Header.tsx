@@ -9,7 +9,8 @@ import {
   Tv, 
   FileSpreadsheet, 
   ShieldCheck, 
-  AlertCircle
+  AlertCircle,
+  Grid3X3
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -21,6 +22,7 @@ interface HeaderProps {
   onExportExcel: () => void;
   totalVotes: number;
   onOpenSecurity?: () => void;
+  onOpenManualTallySheet?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -32,6 +34,7 @@ export const Header: React.FC<HeaderProps> = ({
   onExportExcel,
   totalVotes,
   onOpenSecurity,
+  onOpenManualTallySheet,
 }) => {
   const [timeString, setTimeString] = useState<string>('');
 
@@ -164,6 +167,18 @@ export const Header: React.FC<HeaderProps> = ({
               <Tv className="w-4 h-4" />
               <span className="hidden sm:inline">نمایشگر سالن</span>
             </button>
+
+            {/* Manual Tally Sheet Print Button (Grid of 5x10) */}
+            {onOpenManualTallySheet && (
+              <button
+                onClick={onOpenManualTallySheet}
+                title="فرم چاپی شمارش دستی کاندیداها (جدول شطرنجی ۵۰ تایی با قلم و امضای مسئولین)"
+                className="p-2 sm:px-3 sm:py-2 bg-teal-600/20 hover:bg-teal-600/30 text-teal-300 border border-teal-500/30 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition"
+              >
+                <Grid3X3 className="w-4 h-4 text-teal-400" />
+                <span className="hidden sm:inline">فرم شمارش دستی</span>
+              </button>
+            )}
 
             {/* Excel Export Button (.xlsx) */}
             <button

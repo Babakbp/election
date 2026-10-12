@@ -46,6 +46,7 @@ import { BackupRestoreModal } from './components/BackupRestoreModal';
 import { BallotPaperDesignerTab } from './components/BallotPaperDesignerTab';
 import { SecurityConfigModal } from './components/SecurityConfigModal';
 import { AppLockScreenModal } from './components/AppLockScreenModal';
+import { ManualTallySheetModal } from './components/ManualTallySheetModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { getAppPasswordInfo, getLicenseStatus, CREATOR_NAME, CREATOR_EMAIL } from './utils/license';
 
@@ -154,6 +155,7 @@ export default function App() {
   const [isProjectorOpen, setIsProjectorOpen] = useState(false);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
+  const [isManualTallyModalOpen, setIsManualTallyModalOpen] = useState(false);
   const [isAppLocked, setIsAppLocked] = useState(() => getAppPasswordInfo().isLocked);
   const [licenseData, setLicenseData] = useState(() => getLicenseStatus());
   const [flashMessage, setFlashMessage] = useState<string | null>(null);
@@ -887,6 +889,7 @@ export default function App() {
         onExportExcel={handleExportExcel}
         totalVotes={totalVotes}
         onOpenSecurity={() => setIsSecurityModalOpen(true)}
+        onOpenManualTallySheet={() => setIsManualTallyModalOpen(true)}
       />
 
       {/* Flash Banner if any */}
@@ -1084,6 +1087,7 @@ export default function App() {
             onUpdateCandidatePhoto={handleUpdateCandidatePhoto}
             onUpdateCandidate={handleUpdateCandidate}
             onDeleteCandidate={handleDeleteCandidate}
+            onOpenManualTallySheet={() => setIsManualTallyModalOpen(true)}
           />
         )}
 
@@ -1103,6 +1107,7 @@ export default function App() {
             session={session}
             voters={voters}
             isLocked={session.status === 'LOCKED_FINAL'}
+            onOpenManualTallySheet={() => setIsManualTallyModalOpen(true)}
           />
         )}
 
@@ -1222,6 +1227,14 @@ export default function App() {
           />
         </ErrorBoundary>
       )}
+
+      {/* Manual Tally Sheet Modal (5 clusters of 10 grid boxes per candidate) */}
+      <ManualTallySheetModal
+        isOpen={isManualTallyModalOpen}
+        onClose={() => setIsManualTallyModalOpen(false)}
+        candidates={candidates}
+        session={session}
+      />
     </div>
   );
 }

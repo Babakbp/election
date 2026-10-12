@@ -47,12 +47,13 @@
     background: transparent !important;
   }
 
-  /* 4. Official Minutes Paper Sheet Formatting */
-  #official-minutes-document {
+  /* 4. Official Minutes and Manual Tally Paper Sheet Formatting */
+  #official-minutes-document,
+  #manual-tally-sheet-document {
     display: block !important;
     position: relative !important;
     margin: 0 auto !important;
-    padding: 10mm 12mm !important;
+    padding: 8mm 10mm !important;
     max-width: 100% !important;
     width: 100% !important;
     box-shadow: none !important;
@@ -61,37 +62,48 @@
     background-color: #ffffff !important;
     background: #ffffff !important;
     color: #000000 !important;
-    page-break-inside: avoid !important;
+    page-break-inside: auto !important;
   }
 
-  #official-minutes-document * {
+  #official-minutes-document *,
+  #manual-tally-sheet-document * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
 
-  /* Tables within official minutes */
-  #official-minutes-document table {
+  /* Tables within official minutes and manual tally sheet */
+  #official-minutes-document table,
+  #manual-tally-sheet-document table {
     border-collapse: collapse !important;
     width: 100% !important;
-    border: 1px solid #000000 !important;
+    border: 1.5px solid #000000 !important;
   }
 
   #official-minutes-document th,
-  #official-minutes-document td {
+  #official-minutes-document td,
+  #manual-tally-sheet-document th,
+  #manual-tally-sheet-document td {
     border: 1px solid #000000 !important;
     color: #000000 !important;
-    padding: 4px 6px !important;
+    padding: 3px 4px !important;
   }
 
-  #official-minutes-document thead {
+  #official-minutes-document thead,
+  #manual-tally-sheet-document thead {
     background-color: #f1f5f9 !important;
     font-weight: bold !important;
   }
 
   /* Signature & seal boxes */
-  #official-minutes-document .border-2 {
+  #official-minutes-document .border-2,
+  #manual-tally-sheet-document .border-2 {
     border-width: 1.5px !important;
     border-color: #000000 !important;
+  }
+
+  /* Ensure modal backdrop and scrollbars disappear during print */
+  body:has(#manual-tally-sheet-document) {
+    overflow: visible !important;
   }
 
   /* Standard A4 Paper Setup */
@@ -100,3 +112,4 @@
     margin: 8mm 6mm;
   }
 }
+

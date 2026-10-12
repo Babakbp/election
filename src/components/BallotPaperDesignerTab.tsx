@@ -20,7 +20,8 @@ import {
   Copy,
   Layout,
   Grid,
-  Barcode
+  Barcode,
+  Grid3X3
 } from 'lucide-react';
 
 /**
@@ -93,6 +94,7 @@ interface BallotPaperDesignerTabProps {
   session: ElectionSession;
   voters: Voter[];
   isLocked: boolean;
+  onOpenManualTallySheet?: () => void;
 }
 
 export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
@@ -100,6 +102,7 @@ export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
   session,
   voters,
   isLocked,
+  onOpenManualTallySheet,
 }) => {
   // Default Ballot Configuration
   const [config, setConfig] = useState<BallotPaperConfig>({
@@ -163,6 +166,18 @@ export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          {onOpenManualTallySheet && (
+            <button
+              type="button"
+              onClick={onOpenManualTallySheet}
+              className="px-4 py-2.5 bg-teal-600/20 hover:bg-teal-600/30 text-teal-300 font-bold rounded-xl text-xs flex items-center gap-2 border border-teal-500/30 transition shadow-md active:scale-95"
+              title="فرم چاپی جدول شطرنجی ۵۰ تایی برای شمارش دستی آرا با قلم در صورت عدم دسترسی به نرم‌افزار"
+            >
+              <Grid3X3 className="w-4 h-4 text-teal-400" />
+              <span>فرم شمارش دستی (جدول شطرنجی)</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handlePrint}
