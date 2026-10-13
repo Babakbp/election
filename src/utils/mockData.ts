@@ -176,6 +176,7 @@ export function createInitialSession(): ElectionSession {
     registeredVotersCount: 350,
     blankBallots: 4,   // آرای باطله سفید
     invalidBallots: 2, // آرای باطله خط‌خورده
+    maxVotesPerVoter: 1, // پیش‌فرض: تک انتخابی
     presidingOfficer: {
       id: 'OFF-01',
       name: 'مهندس سید رضا علوی',

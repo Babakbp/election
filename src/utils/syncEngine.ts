@@ -16,6 +16,7 @@ export interface SyncMessage {
     | 'VOTER_UNDO_CHECK_IN'
     | 'VOTER_ADD'
     | 'KIOSK_VOTE_CAST'
+    | 'KIOSK_MULTIPLE_VOTES_CAST'
     | 'CANDIDATE_VOTE_INCREMENT'
     | 'SESSION_UPDATE'
     | 'FULL_STATE_SYNC'

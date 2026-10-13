@@ -173,10 +173,17 @@ class AudioFeedbackService {
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start();
-      osc.stop(ctx.currentTime + 0.06);
     } catch {
       // ignore
     }
+  }
+
+  playWarning() {
+    this.playNotFoundWarning();
+  }
+
+  playClick() {
+    this.playCandidateSelect();
   }
 }
 

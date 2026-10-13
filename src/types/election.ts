@@ -95,6 +95,7 @@ export interface ElectionSession {
   registeredVotersCount: number; // کل واجدین شرایط
   blankBallots: number; // آرای باطله سفید (ممتنع)
   invalidBallots: number; // آرای باطله غیرمجاز (خط‌خورده)
+  maxVotesPerVoter?: number; // سقف تعداد انتخاب کاندیداها برای هر رأی‌دهنده (پیش‌فرض: ۱ نفر)
   presidingOfficer: OfficialPerson; // مسئول حوزه / رئیس شعبه
   observers: OfficialPerson[]; // ناظران و بازرسان
   status: SessionStatus;

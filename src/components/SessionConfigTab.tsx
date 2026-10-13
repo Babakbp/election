@@ -54,6 +54,7 @@ export const SessionConfigTab: React.FC<SessionConfigTabProps> = ({
   const [stationNumber, setStationNumber] = useState(session.stationNumber);
   const [boxNumber, setBoxNumber] = useState(session.boxNumber);
   const [registeredVotersCount, setRegisteredVotersCount] = useState(session.registeredVotersCount);
+  const [maxVotesPerVoter, setMaxVotesPerVoter] = useState(session.maxVotesPerVoter || 1);
   const [tieBreakerRule, setTieBreakerRule] = useState<TieBreakerRule>(session.tieBreakerRule);
   const [actionReason, setActionReason] = useState('');
   const [modalStatusChange, setModalStatusChange] = useState<SessionStatus | null>(null);
@@ -151,6 +152,7 @@ export const SessionConfigTab: React.FC<SessionConfigTabProps> = ({
         stationNumber,
         boxNumber,
         registeredVotersCount: Number(registeredVotersCount) || 0,
+        maxVotesPerVoter: Math.max(1, Number(maxVotesPerVoter) || 1),
         tieBreakerRule,
       },
       'بروزرسانی مشخصات و تنظیمات عمومی جلسه انتخابات'
@@ -397,6 +399,52 @@ export const SessionConfigTab: React.FC<SessionConfigTabProps> = ({
                   onChange={(e) => setRegisteredVotersCount(Number(e.target.value))}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono text-center outline-none focus:border-emerald-500 disabled:opacity-50"
                 />
+              </div>
+            </div>
+
+            {/* Max Votes Allowed Per Voter (سقف انتخاب برای هر رأی‌دهنده) */}
+            <div className="p-3.5 bg-emerald-950/30 border border-emerald-500/30 rounded-xl space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-300">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>سقف مجاز انتخاب کاندیداها برای هر رأی‌دهنده:</span>
+                </div>
+                <span className="text-xs font-black px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                  {toPersianDigits(maxVotesPerVoter)} کاندیدا
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                مشخص می‌کند هر رأی‌دهنده مجاز به انتخاب همزمان چند نفر است. این سقف به صورت خودکار در صفحه کیوسک لمسی و اسکن موبایل اعمال می‌گردد.
+              </p>
+              
+              <div className="flex items-center gap-2 pt-1 flex-wrap">
+                {[1, 2, 3, 5, 7, 9].map((num) => (
+                  <button
+                    key={num}
+                    type="button"
+                    disabled={isLocked}
+                    onClick={() => setMaxVotesPerVoter(num)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                      maxVotesPerVoter === num
+                        ? 'bg-emerald-600 text-white shadow-md shadow-emerald-900/40'
+                        : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700'
+                    }`}
+                  >
+                    {toPersianDigits(num)} {num === 1 ? 'نفر (تک‌انتخابی)' : 'نفر'}
+                  </button>
+                ))}
+                <div className="flex items-center gap-1.5 mr-auto">
+                  <span className="text-[11px] text-slate-400">تعداد دلخواه:</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    disabled={isLocked}
+                    value={maxVotesPerVoter}
+                    onChange={(e) => setMaxVotesPerVoter(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-16 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white text-center font-mono focus:border-emerald-500 outline-none"
+                  />
+                </div>
               </div>
             </div>
 

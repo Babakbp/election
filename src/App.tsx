@@ -427,7 +427,7 @@ export default function App() {
         });
       }
 
-      // 3. Vote cast from Touchscreen Kiosk
+      // 3. Vote cast from Touchscreen Kiosk (Single)
       if (msg.type === 'KIOSK_VOTE_CAST' && msg.payload) {
         const { candidateId, candidateName, candidateNumber } = msg.payload;
         setCandidates((prev) =>
@@ -449,6 +449,37 @@ export default function App() {
             delta: 1,
             reason: `ثبت رأی مستقیم شهروند توسط مانیتور لمسی کیوسک دیجیتال`,
           });
+        }
+      }
+
+      // 3.1 Multiple Votes Cast from Touchscreen Kiosk
+      if (msg.type === 'KIOSK_MULTIPLE_VOTES_CAST' && msg.payload) {
+        const { candidateIds, candidates: chosenList } = msg.payload;
+        if (Array.isArray(candidateIds) && candidateIds.length > 0) {
+          setCandidates((prev) =>
+            prev.map((c) => (candidateIds.includes(c.id) ? { ...c, votes: c.votes + 1 } : c))
+          );
+
+          if (stationRole === 'master') {
+            audioFeedback.playVoteCast();
+            showFlash(`${toPersianDigits(candidateIds.length)} رأی همزمان از کیوسک لمسی ثبت شد.`);
+            if (Array.isArray(chosenList)) {
+              for (const cand of chosenList) {
+                await appendAuditEvent({
+                  operatorName: 'کیوسک لمسی دیجیتال (باجه ۱)',
+                  operatorRole: 'صندوق الکترونیک اخذ رأی',
+                  candidateId: cand.id,
+                  candidateName: cand.name,
+                  candidateNumber: cand.code,
+                  actionType: 'VOTE_INCREMENT',
+                  previousValue: null,
+                  newValue: 'رأی چندانتخابی کیوسک',
+                  delta: 1,
+                  reason: `ثبت همزمان آرای شهروند در برگه چند انتخابی کیوسک دیجیتال (${toPersianDigits(candidateIds.length)} انتخاب)`,
+                });
+              }
+            }
+          }
         }
       }
 
@@ -503,6 +534,33 @@ export default function App() {
     });
 
     showFlash(`رأی ${cand.name} افزایش یافت (+${toPersianDigits(amount)})`);
+  };
+
+  // Multiple Votes Cast from Touchscreen Kiosk
+  const handleMultipleVotesCastFromKiosk = async (candidateIds: string[]) => {
+    if (session.status === 'LOCKED_FINAL' || candidateIds.length === 0) return;
+
+    setCandidates((prev) =>
+      prev.map((c) => (candidateIds.includes(c.id) ? { ...c, votes: c.votes + 1 } : c))
+    );
+
+    const chosenCands = candidates.filter((c) => candidateIds.includes(c.id));
+    for (const cand of chosenCands) {
+      await appendAuditEvent({
+        operatorName: 'کیوسک لمسی دیجیتال (باجه ۱)',
+        operatorRole: 'صندوق الکترونیک اخذ رأی',
+        candidateId: cand.id,
+        candidateName: cand.name,
+        candidateNumber: cand.candidateNumber,
+        actionType: 'VOTE_INCREMENT',
+        previousValue: cand.votes,
+        newValue: cand.votes + 1,
+        delta: 1,
+        reason: `ثبت رأی همزمان در برگه چند انتخابی (${toPersianDigits(candidateIds.length)} کاندیدا)`,
+      });
+    }
+
+    showFlash(`${toPersianDigits(candidateIds.length)} رأی جدید از کیوسک لمسی ثبت شد.`);
   };
 
   // Vote Correction / Decrement
@@ -1155,6 +1213,7 @@ export default function App() {
           session={session}
           candidates={candidates}
           onVoteCast={(candId) => handleIncrementVote(candId, 1)}
+          onMultipleVotesCast={handleMultipleVotesCastFromKiosk}
           onExitKiosk={() => handleSelectStationRole('master')}
         />
       </ErrorBoundary>

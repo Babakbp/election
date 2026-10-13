@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import QRCode from 'qrcode';
 import { 
   Voter, 
   ElectionSession, 
@@ -27,7 +28,13 @@ import {
   RefreshCw,
   Phone,
   ShieldCheck,
-  IdCard
+  IdCard,
+  QrCode,
+  Smartphone,
+  ExternalLink,
+  Copy,
+  Check,
+  X
 } from 'lucide-react';
 
 interface VoterCheckinTerminalProps {
@@ -67,6 +74,13 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
   const [quickPhone, setQuickPhone] = useState('');
   const [quickError, setQuickError] = useState('');
 
+  // Mobile Voting QR Modal
+  const [isMobileQrModalOpen, setIsMobileQrModalOpen] = useState(false);
+  const [currentVoterForQr, setCurrentVoterForQr] = useState<Voter | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState('');
+  const [customHost, setCustomHost] = useState('');
+  const [copiedLink, setCopiedLink] = useState(false);
+
   const barcodeInputRef = useRef<HTMLInputElement>(null);
 
   // Derived statistics
@@ -74,6 +88,7 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
   const totalCount = voters.length;
   const remainingCount = totalCount - votedCount;
   const attendancePercentage = totalCount > 0 ? Math.round((votedCount / totalCount) * 100) : 0;
+  const maxAllowedVotes = session.maxVotesPerVoter || 1;
 
   // Sync fullscreen state
   useEffect(() => {
@@ -86,10 +101,39 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
 
   // Autofocus barcode input
   useEffect(() => {
-    if (!isQuickRegisterOpen) {
+    if (!isQuickRegisterOpen && !isMobileQrModalOpen) {
       barcodeInputRef.current?.focus();
     }
-  }, [isQuickRegisterOpen]);
+  }, [isQuickRegisterOpen, isMobileQrModalOpen]);
+
+  // Compute mobile voting URL
+  const mobileVotingUrl = useMemo(() => {
+    if (typeof window === 'undefined') return '';
+    const base = customHost.trim() || `${window.location.protocol}//${window.location.host}${window.location.pathname}`;
+    const cleanBase = base.endsWith('/') ? base : base;
+    const url = new URL(cleanBase.startsWith('http') ? cleanBase : `http://${cleanBase}`);
+    url.searchParams.set('station', 'kiosk');
+    if (currentVoterForQr) {
+      url.searchParams.set('voter', currentVoterForQr.id);
+    }
+    return url.toString();
+  }, [customHost, currentVoterForQr]);
+
+  // Generate QR code when modal opens or url changes
+  useEffect(() => {
+    if (isMobileQrModalOpen && mobileVotingUrl) {
+      QRCode.toDataURL(mobileVotingUrl, {
+        width: 320,
+        margin: 2,
+        color: {
+          dark: '#022c22',
+          light: '#ffffff',
+        },
+      })
+        .then((url) => setQrDataUrl(url))
+        .catch((err) => console.error('QR generation error:', err));
+    }
+  }, [isMobileQrModalOpen, mobileVotingUrl]);
 
   const toggleFullscreen = async () => {
     try {
@@ -180,74 +224,88 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
     }, 100);
   };
 
-  // Quick register submit
+  const handleBarcodeFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    handleProcessBarcodeScan(barcodeInput);
+  };
+
   const handleQuickRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickFullName.trim()) {
-      setQuickError('نام و نام خانوادگی الزامی است');
+      setQuickError('نام و نام خانوادگی الزامی است.');
       return;
     }
+
     const cleanNId = toEnglishDigits(quickNId).trim();
-    if (cleanNId && cleanNId.length !== 10) {
-      setQuickError('کد ملی باید ۱۰ رقم باشد');
+    if (cleanNId.length !== 10) {
+      setQuickError('کد ملی باید دقیقاً ۱۰ رقم باشد.');
+      return;
+    }
+
+    // Check duplicate
+    if (voters.some(v => toEnglishDigits(v.nationalId).trim() === cleanNId)) {
+      setQuickError('این کد ملی پیش از این در فهرست ثبت شده است.');
       return;
     }
 
     audioFeedback.playVoterCheckin();
-
     await onAddVoter({
       fullName: quickFullName.trim(),
       nationalId: cleanNId,
-      nationalIdMasked: cleanNId ? maskNationalId(cleanNId) : '—',
+      nationalIdMasked: maskNationalId(cleanNId),
       phoneNumber: toEnglishDigits(quickPhone).trim(),
     });
 
     setIsQuickRegisterOpen(false);
+    setScanResult({
+      type: 'SUCCESS',
+      message: `رأی‌دهنده جدید «${quickFullName.trim()}» با موفقیت ثبت و تعرفه رأی صادر گردید.`,
+      timestamp: formatJalali(new Date(), true),
+    });
+
     setQuickFullName('');
     setQuickNId('');
     setQuickPhone('');
     setQuickError('');
-    setScanResult({
-      type: 'SUCCESS',
-      message: `رأی‌دهنده جدید «${quickFullName}» ثبت و تعرفه رأی برای ایشان صادر شد.`,
-      timestamp: formatJalali(new Date(), true),
-    });
+
+    setTimeout(() => {
+      barcodeInputRef.current?.focus();
+    }, 100);
   };
 
-  // Filtered voters
+  // Filtered voters list
   const filteredVoters = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    const cleanQ = toEnglishDigits(q);
+    return voters.filter(v => {
+      const matchesSearch = 
+        !searchQuery ||
+        v.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        toEnglishDigits(v.nationalId).includes(toEnglishDigits(searchQuery)) ||
+        toEnglishDigits(v.phoneNumber || '').includes(toEnglishDigits(searchQuery));
 
-    return voters.filter((v) => {
-      const matchFilter =
-        filterState === 'ALL'
-          ? true
-          : filterState === 'VOTED'
-          ? v.hasVoted
-          : !v.hasVoted;
+      if (!matchesSearch) return false;
 
-      if (!matchFilter) return false;
-      if (!q) return true;
-
-      const nameMatch = v.fullName.toLowerCase().includes(q);
-      const nIdMatch = v.nationalId ? toEnglishDigits(v.nationalId).includes(cleanQ) : false;
-      const phoneMatch = v.phoneNumber ? toEnglishDigits(v.phoneNumber).includes(cleanQ) : false;
-
-      return nameMatch || nIdMatch || phoneMatch;
+      if (filterState === 'VOTED') return v.hasVoted;
+      if (filterState === 'NOT_VOTED') return !v.hasVoted;
+      return true;
     });
   }, [voters, searchQuery, filterState]);
+
+  const copyMobileLink = () => {
+    navigator.clipboard.writeText(mobileVotingUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
       {/* Top Header */}
-      <header className="bg-slate-900 border-b border-indigo-500/30 px-6 py-4 flex items-center justify-between sticky top-0 z-30 shadow-md">
-        <div className="flex items-center gap-4">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 ring-2 ring-indigo-400/30">
-            <ScanLine className="w-6 h-6 text-white" />
+      <header className="bg-slate-900 border-b border-indigo-500/30 px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between sticky top-0 z-30 shadow-md">
+        <div className="flex items-center gap-3 sm:gap-4">
+          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 ring-2 ring-indigo-400/30 flex-shrink-0">
+            <ScanLine className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                 لپ‌تاپ ۲: باجه ثبت ورود واجدین شرایط
               </span>
@@ -256,28 +314,41 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
                 <span>همگام‌سازی زنده با سرور مرکزی</span>
               </div>
             </div>
-            <h1 className="text-xl font-black text-slate-100 mt-0.5">
+            <h1 className="text-lg sm:text-xl font-black text-slate-100 mt-0.5">
               {session.title || 'ثبت ورود و صدور تعرفه رأی'}
             </h1>
           </div>
         </div>
 
         {/* Header Right Actions */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            onClick={() => {
+              setCurrentVoterForQr(null);
+              setIsMobileQrModalOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm shadow-lg shadow-emerald-900/30 transition-all active:scale-95"
+            title="نمایش بارکد QR اخذ رأی با موبایل مراجعین"
+          >
+            <Smartphone className="w-4 h-4" />
+            <span className="hidden sm:inline">بارکد اسکن رأی با موبایل</span>
+            <span className="sm:hidden">QR رأی</span>
+          </button>
+
           <button
             onClick={toggleFullscreen}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-sm font-medium transition-colors"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs sm:text-sm font-medium transition-colors"
           >
             {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
-            <span className="hidden sm:inline">{isFullscreen ? 'خروج تمام‌صفحه' : 'تمام‌صفحه'}</span>
+            <span className="hidden md:inline">{isFullscreen ? 'خروج تمام‌صفحه' : 'تمام‌صفحه'}</span>
           </button>
 
           <button
             onClick={onExitTerminal}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-red-500/20 text-slate-300 hover:text-red-300 border border-slate-700 text-sm font-medium transition-colors"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl bg-slate-800 hover:bg-red-500/20 text-slate-300 hover:text-red-300 border border-slate-700 text-xs sm:text-sm font-medium transition-colors"
           >
             <LogOut className="w-4 h-4" />
-            <span className="hidden sm:inline">بازگشت به پنل اصلی</span>
+            <span className="hidden md:inline">بازگشت به پنل اصلی</span>
           </button>
         </div>
       </header>
@@ -318,26 +389,27 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
 
           <div className="bg-slate-900/80 border border-indigo-500/30 rounded-2xl p-4 flex items-center justify-between bg-indigo-950/10">
             <div>
-              <p className="text-xs text-indigo-300 font-bold">درصد مشارکت</p>
-              <p className="text-2xl font-black text-indigo-300 mt-1">٪{toPersianDigits(attendancePercentage)}</p>
+              <p className="text-xs text-indigo-300 font-medium">درصد مشارکت لحظه‌ای</p>
+              <p className="text-2xl font-black text-indigo-200 mt-1">٪{toPersianDigits(attendancePercentage)}</p>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-300 flex items-center justify-center">
               <Sparkles className="w-5 h-5" />
             </div>
           </div>
         </div>
 
-        {/* High-speed Barcode Scanning Station */}
-        <div className="bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border border-indigo-500/40 rounded-3xl p-5 shadow-lg">
-          <div className="flex flex-col md:flex-row items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center flex-shrink-0 ring-2 ring-indigo-500/30">
-              <Barcode className="w-6 h-6" />
-            </div>
-
+        {/* High-Speed Barcode Scanner Box */}
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950/30 to-slate-900 border-2 border-indigo-500/40 rounded-3xl p-5 md:p-6 shadow-xl">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex-1 w-full">
-              <label className="block text-xs font-bold text-indigo-300 mb-1">
-                اسکن بارکد کارت ملی یا تایپ سریع کد ملی ۱۰ رقمی (اینتر برای ثبت فوری):
-              </label>
+              <div className="flex items-center gap-2 mb-2">
+                <Barcode className="w-5 h-5 text-indigo-400" />
+                <h3 className="font-bold text-slate-100 text-base">اسکنر بارکد کارت ملی / وارد کردن کد ملی:</h3>
+              </div>
+              <p className="text-xs text-slate-400 mb-3">
+                دستگاه بارکدخوان بارکد ۲بعدی یا خطی کارت ملی را مستقیماً در این کادر می‌خواند و پس از تایید، تعرفه صادر می‌گردد.
+              </p>
+
               <div className="relative">
                 <input
                   ref={barcodeInputRef}
@@ -350,13 +422,13 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
                       handleProcessBarcodeScan(barcodeInput);
                     }
                   }}
-                  placeholder="بارکدخوان را روی کارت ملی بگیرید یا کد ملی را تایپ و Enter بزنید..."
-                  className="w-full pl-28 pr-4 py-3.5 rounded-2xl bg-slate-950 border-2 border-indigo-500/50 text-white font-mono text-lg tracking-wider placeholder:text-slate-500 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/20 transition-all"
+                  placeholder="بارکد کارت ملی را اسکن کنید یا کد ملی را وارد نموده و اینتر بزنید..."
+                  className="w-full pl-28 pr-4 py-3.5 bg-slate-950 border-2 border-indigo-500/50 rounded-2xl text-white text-base font-mono focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/20 outline-none placeholder:text-slate-500"
                 />
                 <button
                   type="button"
                   onClick={() => handleProcessBarcodeScan(barcodeInput)}
-                  className="absolute left-2 top-2 bottom-2 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors flex items-center gap-1.5"
+                  className="absolute left-2 top-2 bottom-2 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors shadow"
                 >
                   <ScanLine className="w-4 h-4" />
                   <span>ثبت ورود</span>
@@ -364,25 +436,38 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
               </div>
             </div>
 
-            <button
-              onClick={() => {
-                setQuickNId('');
-                setQuickFullName('');
-                setQuickPhone('');
-                setQuickError('');
-                setIsQuickRegisterOpen(true);
-              }}
-              className="px-4 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-sm font-bold flex items-center gap-2 whitespace-nowrap"
-            >
-              <UserPlus className="w-4 h-4 text-emerald-400" />
-              <span>ثبت مراجع جدید (بدون نوبت)</span>
-            </button>
+            <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+              <button
+                onClick={() => {
+                  setQuickNId('');
+                  setQuickFullName('');
+                  setQuickPhone('');
+                  setQuickError('');
+                  setIsQuickRegisterOpen(true);
+                }}
+                className="px-4 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-xs sm:text-sm font-bold flex items-center justify-center gap-2 whitespace-nowrap"
+              >
+                <UserPlus className="w-4 h-4 text-emerald-400" />
+                <span>ثبت مراجع جدید (بدون نوبت)</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setCurrentVoterForQr(null);
+                  setIsMobileQrModalOpen(true);
+                }}
+                className="px-4 py-3.5 rounded-2xl bg-emerald-600/30 hover:bg-emerald-600 text-emerald-200 hover:text-white border border-emerald-500/40 text-xs sm:text-sm font-bold flex items-center justify-center gap-2 whitespace-nowrap transition-colors"
+              >
+                <QrCode className="w-4 h-4" />
+                <span>نمایش بارکد QR اخذ رأی</span>
+              </button>
+            </div>
           </div>
 
           {/* Scan Result Feedback Alert */}
           {scanResult && (
             <div
-              className={`mt-4 p-4 rounded-2xl border flex items-center justify-between gap-3 text-sm animate-fadeIn ${
+              className={`mt-4 p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-sm animate-fadeIn ${
                 scanResult.type === 'SUCCESS'
                   ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-200'
                   : scanResult.type === 'DUPLICATE'
@@ -399,103 +484,132 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
                 <p className="font-bold">{scanResult.message}</p>
               </div>
 
-              {scanResult.type === 'NOT_FOUND' && (
-                <button
-                  onClick={() => setIsQuickRegisterOpen(true)}
-                  className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black"
-                >
-                  افزودن سریع این شخص
-                </button>
-              )}
+              <div className="flex items-center gap-2 self-stretch sm:self-auto justify-end">
+                {scanResult.type === 'SUCCESS' && scanResult.voter && (
+                  <button
+                    onClick={() => {
+                      setCurrentVoterForQr(scanResult.voter || null);
+                      setIsMobileQrModalOpen(true);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 shadow"
+                  >
+                    <Smartphone className="w-4 h-4" />
+                    <span>اسکن QR با موبایل مراجع</span>
+                  </button>
+                )}
+
+                {scanResult.type === 'NOT_FOUND' && (
+                  <button
+                    onClick={() => setIsQuickRegisterOpen(true)}
+                    className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black"
+                  >
+                    افزودن سریع این شخص
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
 
-        {/* Search & Filter Bar */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-900 p-3 rounded-2xl border border-slate-800">
-          <div className="relative flex-1 w-full">
-            <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-3.5" />
+        {/* Voter Directory Section */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 md:p-6 shadow-lg">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-5 pb-4 border-b border-slate-800">
+            <div>
+              <h3 className="font-bold text-slate-100 text-base flex items-center gap-2">
+                <IdCard className="w-5 h-5 text-indigo-400" />
+                <span>دفتر آمار و فهرست واجدین شرایط شعبه</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                امکان جستجوی دستی بر اساس نام و کد ملی، ثبت ورود دستی، و صدور بارکد QR اختصاصی برای موبایل
+              </p>
+            </div>
+
+            {/* Filter buttons */}
+            <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-2xl border border-slate-800 text-xs">
+              <button
+                onClick={() => setFilterState('ALL')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-colors ${
+                  filterState === 'ALL'
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                همه ({toPersianDigits(totalCount)})
+              </button>
+              <button
+                onClick={() => setFilterState('VOTED')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-colors ${
+                  filterState === 'VOTED'
+                    ? 'bg-emerald-600 text-white'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                تعرفه صادر شده ({toPersianDigits(votedCount)})
+              </button>
+              <button
+                onClick={() => setFilterState('NOT_VOTED')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-colors ${
+                  filterState === 'NOT_VOTED'
+                    ? 'bg-amber-600 text-white'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                حاضر نشده ({toPersianDigits(remainingCount)})
+              </button>
+            </div>
+          </div>
+
+          {/* Search bar */}
+          <div className="relative mb-4">
+            <Search className="w-5 h-5 text-slate-400 absolute right-4 top-3.5" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="جستجو در لیست بر اساس نام، نام خانوادگی، کد ملی یا شماره همراه..."
-              className="w-full pr-10 pl-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+              placeholder="جستجو بر اساس نام، کد ملی یا شماره همراه..."
+              className="w-full pr-12 pl-4 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-slate-200 text-sm focus:border-indigo-500 focus:outline-none"
             />
           </div>
 
-          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
-            <button
-              onClick={() => setFilterState('ALL')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                filterState === 'ALL' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              همه ({toPersianDigits(voters.length)})
-            </button>
-            <button
-              onClick={() => setFilterState('NOT_VOTED')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                filterState === 'NOT_VOTED' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              در انتظار ورود ({toPersianDigits(remainingCount)})
-            </button>
-            <button
-              onClick={() => setFilterState('VOTED')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                filterState === 'VOTED' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              وارد شده‌ها ({toPersianDigits(votedCount)})
-            </button>
-          </div>
-        </div>
-
-        {/* Voters List Table / Cards */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-sm">
-          <div className="overflow-x-auto max-h-[550px] overflow-y-auto">
-            <table className="w-full text-right text-sm">
-              <thead className="bg-slate-950 text-slate-400 text-xs sticky top-0 z-10 border-b border-slate-800">
+          {/* Table */}
+          <div className="overflow-x-auto rounded-2xl border border-slate-800">
+            <table className="w-full text-right text-xs">
+              <thead className="bg-slate-950/80 text-slate-400 font-bold border-b border-slate-800">
                 <tr>
-                  <th className="py-3.5 px-4 font-bold">ردیف</th>
-                  <th className="py-3.5 px-4 font-bold">نام و نام خانوادگی</th>
-                  <th className="py-3.5 px-4 font-bold">کد ملی</th>
-                  <th className="py-3.5 px-4 font-bold">شماره تماس</th>
-                  <th className="py-3.5 px-4 font-bold">وضعیت تعرفه</th>
-                  <th className="py-3.5 px-4 font-bold text-center">عملیات پذیرش</th>
+                  <th className="py-3 px-4">ردیف</th>
+                  <th className="py-3 px-4">نام و نام خانوادگی</th>
+                  <th className="py-3 px-4">کد ملی</th>
+                  <th className="py-3 px-4">شماره همراه</th>
+                  <th className="py-3 px-4 text-center">وضعیت تعرفه</th>
+                  <th className="py-3 px-4 text-center">عملیات پذیرش / بارکد موبایل</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
                 {filteredVoters.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-12 text-slate-500">
-                      موردی مطابق با جستجوی شما یافت نشد.
+                    <td colSpan={6} className="text-center py-8 text-slate-500 text-sm">
+                      هیچ موردی مطابق با جستجوی شما یافت نشد.
                     </td>
                   </tr>
                 ) : (
-                  filteredVoters.map((voter) => (
+                  filteredVoters.map((voter, index) => (
                     <tr
                       key={voter.id}
-                      className={`hover:bg-slate-850/60 transition-colors ${
+                      className={`hover:bg-slate-850 transition-colors ${
                         voter.hasVoted ? 'bg-emerald-950/10' : ''
                       }`}
                     >
-                      <td className="py-3 px-4 font-mono text-slate-400">
-                        {toPersianDigits(voter.rowNumber)}
-                      </td>
-                      <td className="py-3 px-4 font-bold text-slate-200">
-                        {voter.fullName}
-                      </td>
+                      <td className="py-3 px-4 font-mono text-slate-500">{toPersianDigits(index + 1)}</td>
+                      <td className="py-3 px-4 font-bold text-slate-100">{voter.fullName}</td>
                       <td className="py-3 px-4 font-mono text-slate-300">
-                        {toPersianDigits(voter.nationalIdMasked || voter.nationalId)}
+                        {toPersianDigits(voter.nationalIdMasked || maskNationalId(voter.nationalId))}
                       </td>
                       <td className="py-3 px-4 font-mono text-slate-400">
                         {voter.phoneNumber ? toPersianDigits(voter.phoneNumber) : '—'}
                       </td>
-                      <td className="py-3 px-4">
+                      <td className="py-3 px-4 text-center">
                         {voter.hasVoted ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                             <CheckCircle2 className="w-3.5 h-3.5" />
                             <span>تعرفه صادر شد ({toPersianDigits(voter.votedAt || '')})</span>
                           </span>
@@ -507,38 +621,52 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
                         )}
                       </td>
                       <td className="py-3 px-4 text-center">
-                        <button
-                          onClick={async () => {
-                            if (!voter.hasVoted) {
-                              audioFeedback.playVoterCheckin();
-                            }
-                            await onToggleVoterStatus(voter.id);
-                            syncEngine.broadcast('VOTER_CHECK_IN', {
-                              voterId: voter.id,
-                              voterName: voter.fullName,
-                              newStatus: !voter.hasVoted,
-                              timestamp: new Date().toISOString(),
-                              operatorName: currentOperator.name || 'اپراتور باجه',
-                            });
-                          }}
-                          className={`px-4 py-2 rounded-xl text-xs font-black transition-all active:scale-95 flex items-center justify-center gap-1.5 mx-auto ${
-                            voter.hasVoted
-                              ? 'bg-slate-800 hover:bg-red-500/20 text-slate-300 hover:text-red-300 border border-slate-700'
-                              : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-900/30 ring-2 ring-emerald-500/30'
-                          }`}
-                        >
-                          {voter.hasVoted ? (
-                            <>
-                              <XCircle className="w-4 h-4" />
-                              <span>لغو صدور تعرفه</span>
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle2 className="w-4 h-4" />
-                              <span>ثبت ورود و صدور تعرفه</span>
-                            </>
-                          )}
-                        </button>
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCurrentVoterForQr(voter);
+                              setIsMobileQrModalOpen(true);
+                            }}
+                            className="p-2 rounded-xl bg-slate-800 hover:bg-emerald-500/20 text-slate-400 hover:text-emerald-300 border border-slate-700 transition"
+                            title="تولید و نمایش بارکد اسکن رأی با موبایل برای این شخص"
+                          >
+                            <QrCode className="w-4 h-4" />
+                          </button>
+
+                          <button
+                            onClick={async () => {
+                              if (!voter.hasVoted) {
+                                audioFeedback.playVoterCheckin();
+                              }
+                              await onToggleVoterStatus(voter.id);
+                              syncEngine.broadcast('VOTER_CHECK_IN', {
+                                voterId: voter.id,
+                                voterName: voter.fullName,
+                                newStatus: !voter.hasVoted,
+                                timestamp: new Date().toISOString(),
+                                operatorName: currentOperator.name || 'اپراتور باجه',
+                              });
+                            }}
+                            className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all active:scale-95 flex items-center justify-center gap-1.5 ${
+                              voter.hasVoted
+                                ? 'bg-slate-800 hover:bg-red-500/20 text-slate-300 hover:text-red-300 border border-slate-700'
+                                : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-900/30 ring-2 ring-emerald-500/30'
+                            }`}
+                          >
+                            {voter.hasVoted ? (
+                              <>
+                                <XCircle className="w-3.5 h-3.5" />
+                                <span>لغو تعرفه</span>
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>صدور تعرفه</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -570,8 +698,7 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
                   type="text"
                   value={quickFullName}
                   onChange={(e) => setQuickFullName(e.target.value)}
-                  placeholder="مثال: علیرضا محمدی"
-                  required
+                  placeholder="مثال: علیرضا حسینی"
                   autoFocus
                   className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-sm focus:outline-none focus:border-indigo-500"
                 />
@@ -625,6 +752,86 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Voting QR Code Modal */}
+      {isMobileQrModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
+          <div className="bg-slate-900 border-2 border-emerald-500/40 rounded-3xl max-w-lg w-full p-6 text-center shadow-2xl relative">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4 text-right">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                  <Smartphone className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-white text-base">بارکد اسکن رأی با موبایل مراجعین</h3>
+                  <p className="text-[11px] text-slate-400">اتصال مستقیم دوربین گوشی هوشمند به صفحه اخذ رأی</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsMobileQrModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {currentVoterForQr && (
+              <div className="mb-3 p-2.5 rounded-xl bg-indigo-950/40 border border-indigo-500/30 text-xs text-indigo-200 flex items-center justify-between">
+                <span>مراجع احراز هویت شده:</span>
+                <span className="font-bold text-white">{currentVoterForQr.fullName}</span>
+                <span className="font-mono text-slate-400">{toPersianDigits(currentVoterForQr.nationalIdMasked)}</span>
+              </div>
+            )}
+
+            {/* Big QR Code image */}
+            <div className="my-3 p-4 bg-white rounded-2xl inline-block shadow-2xl border-4 border-emerald-500/20">
+              {qrDataUrl ? (
+                <img src={qrDataUrl} alt="بارکد رأی با موبایل" className="w-56 h-56 mx-auto object-contain" />
+              ) : (
+                <div className="w-56 h-56 flex items-center justify-center text-slate-400">
+                  <RefreshCw className="w-6 h-6 animate-spin text-emerald-600" />
+                </div>
+              )}
+            </div>
+
+            <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-2xl p-3 text-xs text-emerald-200 text-right space-y-1.5 mb-4">
+              <div className="flex items-center gap-2 font-bold text-emerald-300">
+                <Sparkles className="w-4 h-4" />
+                <span>راهنمای مراجع:</span>
+              </div>
+              <p className="leading-relaxed">
+                ۱. دوربین گوشی خود را به سمت این تصویر بارکد بگیرید تا لینک صفحه رأی باز شود.
+              </p>
+              <p className="leading-relaxed">
+                ۲. کاندیداهای منتخب خود را (تا سقف {toPersianDigits(maxAllowedVotes)} نفر) لمس و انتخاب کنید.
+              </p>
+              <p className="leading-relaxed">
+                ۳. رأی شما بلافاصله از طریق شبکه در لپ‌تاپ ۱ و نمایشگر پروژکتور ثبت و اعمال می‌گردد.
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={copyMobileLink}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-bold border border-slate-700 flex items-center justify-center gap-1.5 transition"
+              >
+                {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                <span>{copiedLink ? 'لینک کپی شد' : 'کپی لینک صفحه رأی'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => window.open(mobileVotingUrl, '_blank')}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition"
+              >
+                <ExternalLink className="w-4 h-4" />
+                <span>تست و باز کردن در تب جدید</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
