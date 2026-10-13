@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Candidate, 
-  ElectionSession, 
-  AuditEvent 
+  ElectionSession 
 } from '../types/election';
 import { toPersianDigits } from '../utils/persian';
 import { audioFeedback } from '../utils/audioFeedback';
@@ -14,17 +13,17 @@ import {
   Maximize, 
   Minimize, 
   Sparkles, 
-  ArrowRight, 
-  HelpCircle, 
-  ShieldCheck, 
   Lock, 
-  Unlock, 
   RefreshCw,
   LogOut,
   AlertTriangle,
-  UserCheck,
   Check,
-  RotateCcw
+  RotateCcw,
+  Eye,
+  EyeOff,
+  Smartphone,
+  ShieldCheck,
+  Info
 } from 'lucide-react';
 
 interface TouchVotingKioskProps {
@@ -46,6 +45,26 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
   const maxAllowed = Math.max(1, session.maxVotesPerVoter || 1);
   const isMultiVoteMode = maxAllowed > 1;
 
+  // Toggle for hiding voted candidates (defaults to true as requested)
+  const [hideVotedCandidates, setHideVotedCandidates] = useState<boolean>(
+    session.hideVotedCandidatesInKiosk !== false
+  );
+
+  // Locally tracked voted candidates in this kiosk session
+  const [votedCandidateIdsLocally, setVotedCandidateIdsLocally] = useState<Set<string>>(() => new Set());
+
+  // Check URL parameters for voter identity (e.g., from QR scan: ?station=kiosk&voter=VOTER-123)
+  const voterIdParam = useMemo(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('voter');
+  }, []);
+
+  // Check if this voter has already voted
+  const [hasAlreadyVoted, setHasAlreadyVoted] = useState<boolean>(() => {
+    if (typeof window === 'undefined' || !voterIdParam) return false;
+    return localStorage.getItem(`voter_voted_${voterIdParam}`) === 'true';
+  });
+
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isSuccessView, setIsSuccessView] = useState(false);
@@ -57,13 +76,27 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
   const [enteredPin, setEnteredPin] = useState('');
   const [pinError, setPinError] = useState('');
   const [limitWarning, setLimitWarning] = useState<string | null>(null);
+  const [isSubmittingVote, setIsSubmittingVote] = useState(false);
 
   // Filter approved candidates
   const approvedCandidates = useMemo(() => {
     return candidates.filter(c => c.status === 'APPROVED');
   }, [candidates]);
 
-  // Selected candidates list objects
+  // Candidates visible on the voting ballot
+  // (If hideVotedCandidates is true, any candidate who has votes or was voted in this session is removed)
+  const visibleCandidates = useMemo(() => {
+    if (!hideVotedCandidates) {
+      return approvedCandidates;
+    }
+    return approvedCandidates.filter(c => {
+      const hasVotes = (c.votes || 0) > 0;
+      const isVotedLocally = votedCandidateIdsLocally.has(c.id);
+      return !hasVotes && !isVotedLocally;
+    });
+  }, [approvedCandidates, hideVotedCandidates, votedCandidateIdsLocally]);
+
+  // Selected candidates objects
   const selectedCandidates = useMemo(() => {
     return approvedCandidates.filter(c => selectedCandidateIds.includes(c.id));
   }, [approvedCandidates, selectedCandidateIds]);
@@ -77,7 +110,7 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
 
-  // Request fullscreen on mount for true kiosk experience
+  // Request fullscreen on mount
   useEffect(() => {
     const enterFs = async () => {
       try {
@@ -91,7 +124,7 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
     enterFs();
   }, []);
 
-  // Countdown timer on success view to reset kiosk for next voter
+  // Auto-reset timer after successful vote
   useEffect(() => {
     if (!isSuccessView) return;
 
@@ -124,33 +157,63 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
     }
   };
 
-  // Handle candidate touch/tap
+  /**
+   * Handle candidate touch/click with strict single/multi choice limit enforcement
+   */
   const handleSelectCandidate = (cand: Candidate) => {
     if (session.status === 'LOCKED_FINAL') return;
     if (isKioskLockedByOperator) return;
+    if (hasAlreadyVoted) return;
 
+    const isAlreadySelected = selectedCandidateIds.includes(cand.id);
+
+    // 1. Single Choice Mode (تک انتخابی: ۱ نفر)
     if (!isMultiVoteMode) {
-      // Single candidate mode: tap opens confirm dialog
+      if (isAlreadySelected) {
+        // Deselect
+        audioFeedback.playCandidateSelect();
+        setSelectedCandidateIds([]);
+        setLimitWarning(null);
+        return;
+      }
+
+      // If voter already selected 1 candidate and taps a different candidate:
+      if (selectedCandidateIds.length >= 1) {
+        audioFeedback.playWarning();
+        setLimitWarning(
+          `⚠️ اخطار سقف رأی: انتخابات در حالت تک‌انتخابی تنظیم شده است. شما فقط مجاز به انتخاب ۱ کاندیدا هستید. برای انتخاب «${cand.name}»، ابتدا روی کاندیدای قبلی ضربه بزنید تا لغو انتخاب شود.`
+        );
+        setTimeout(() => setLimitWarning(null), 5000);
+        return;
+      }
+
+      // Select single candidate and open confirm modal
       audioFeedback.playCandidateSelect();
       setSelectedCandidateIds([cand.id]);
+      setLimitWarning(null);
       setIsConfirmModalOpen(true);
       return;
     }
 
-    // Multi-candidate mode: toggle selection
-    if (selectedCandidateIds.includes(cand.id)) {
+    // 2. Multi Choice Mode (چند انتخابی: تا سقف N نفر)
+    if (isAlreadySelected) {
+      // Toggle off
       audioFeedback.playCandidateSelect();
       setSelectedCandidateIds(prev => prev.filter(id => id !== cand.id));
       setLimitWarning(null);
     } else {
+      // Trying to add another candidate: Check limit!
       if (selectedCandidateIds.length < maxAllowed) {
         audioFeedback.playCandidateSelect();
         setSelectedCandidateIds(prev => [...prev, cand.id]);
         setLimitWarning(null);
       } else {
+        // EXCEEDED LIMIT: Emit audio warning & prominent banner!
         audioFeedback.playWarning();
-        setLimitWarning(`سقف مجاز انتخاب شما (${toPersianDigits(maxAllowed)} کاندیدا) تکمیل شده است. برای انتخاب این فرد، ابتدا یکی از انتخاب‌های قبلی را بردارید.`);
-        setTimeout(() => setLimitWarning(null), 4000);
+        setLimitWarning(
+          `⚠️ اخطار سقف آرا: سقف مجاز انتخاب شما (${toPersianDigits(maxAllowed)} کاندیدا) تکمیل شده است. برای انتخاب «${cand.name}»، ابتدا باید یکی از انتخاب‌های قبلی را حذف نمایید.`
+        );
+        setTimeout(() => setLimitWarning(null), 5000);
       }
     }
   };
@@ -161,9 +224,13 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
     audioFeedback.playClick();
   };
 
+  /**
+   * Final vote confirmation and broadcast
+   */
   const handleConfirmVote = async () => {
-    if (selectedCandidateIds.length === 0) return;
+    if (selectedCandidateIds.length === 0 || isSubmittingVote) return;
 
+    setIsSubmittingVote(true);
     setIsConfirmModalOpen(false);
     audioFeedback.playVoteCast();
 
@@ -171,6 +238,7 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
     const chosenNames = chosenCands.map(c => c.name);
 
     try {
+      // 1. Call parent state handlers
       if (onMultipleVotesCast) {
         await onMultipleVotesCast(selectedCandidateIds);
       } else {
@@ -179,28 +247,33 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
         }
       }
 
-      // Broadcast directly via sync engine to all connected laptops & displays
-      if (selectedCandidateIds.length === 1) {
-        const c = chosenCands[0];
-        syncEngine.broadcast('KIOSK_VOTE_CAST', {
-          candidateId: c.id,
-          candidateName: c.name,
-          candidateNumber: c.candidateNumber,
-          timestamp: new Date().toISOString(),
-        });
-      } else {
-        syncEngine.broadcast('KIOSK_MULTIPLE_VOTES_CAST', {
-          candidateIds: selectedCandidateIds,
-          candidates: chosenCands.map(c => ({ id: c.id, name: c.name, code: c.candidateNumber })),
-          timestamp: new Date().toISOString(),
-        });
+      // 2. Deliver via SyncEngine (BroadcastChannel + WebSocket + HTTP REST /api/sync/vote)
+      const stationTitle = voterIdParam ? 'گوشی همراه رأی‌دهنده (اسکن بارکد)' : 'کیوسک لمسی دیجیتال (صندوق ۱)';
+      await syncEngine.castVote(selectedCandidateIds, voterIdParam || undefined, stationTitle);
+
+      // 3. Mark voted candidates locally to remove them from screen if hideVotedCandidates is active
+      setVotedCandidateIdsLocally(prev => {
+        const next = new Set(prev);
+        selectedCandidateIds.forEach(id => next.add(id));
+        return next;
+      });
+
+      // 4. If this is a personal voter QR session, lock it so they cannot vote again
+      if (voterIdParam) {
+        try {
+          localStorage.setItem(`voter_voted_${voterIdParam}`, 'true');
+        } catch {
+          // ignore
+        }
+        setHasAlreadyVoted(true);
       }
     } catch (err) {
-      console.error(err);
+      console.error('Vote submission error:', err);
+    } finally {
+      setIsSubmittingVote(false);
+      setLastVotedCandidateNames(chosenNames);
+      setIsSuccessView(true);
     }
-
-    setLastVotedCandidateNames(chosenNames);
-    setIsSuccessView(true);
   };
 
   const handleAdminExit = (e: React.FormEvent) => {
@@ -213,27 +286,56 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
     }
   };
 
+  // If this individual voter token has already voted:
+  if (hasAlreadyVoted && !isSuccessView) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center select-none">
+        <div className="max-w-md w-full bg-slate-900 border-2 border-emerald-500/40 rounded-3xl p-8 shadow-2xl space-y-4">
+          <div className="w-20 h-20 mx-auto rounded-3xl bg-emerald-500/20 border-2 border-emerald-400 text-emerald-400 flex items-center justify-center shadow-lg">
+            <ShieldCheck className="w-12 h-12" />
+          </div>
+          <h2 className="text-2xl font-black text-slate-100">رأی شما قبلاً با موفقیت ثبت شده است</h2>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            برگه الکترونیک این تعرفه در سامانه به صورت رسمی ثبت و منقضی گردید. طبق آیین‌نامه انتخابات، هر واجد شرایط تنها یک‌بار مجاز به ثبت رأی می‌باشد.
+          </p>
+          <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs font-mono text-emerald-400">
+            شناسه برگه: {voterIdParam || 'ثبت شده در صندوق الکترونیک'}
+          </div>
+          <p className="text-xs text-slate-500">از مشارکت محترم شما سپاسگزاریم.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white flex flex-col font-sans select-none overflow-x-hidden pb-24 md:pb-28">
       {/* Kiosk Header */}
       <header className="bg-slate-900/90 border-b border-emerald-500/30 backdrop-blur-md px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between sticky top-0 z-30 shadow-lg">
         <div className="flex items-center gap-3 sm:gap-4">
           <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-500/20 ring-2 ring-emerald-400/40 flex-shrink-0">
-            <Vote className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
+            {voterIdParam ? (
+              <Smartphone className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
+            ) : (
+              <Vote className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
+            )}
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                باجه لمسی اخذ رأی الکترونیک
+                {voterIdParam ? 'صفحه رأی هوشمند با موبایل' : 'باجه لمسی اخذ رأی الکترونیک'}
               </span>
               <span className="text-[11px] sm:text-xs text-slate-400">
                 شعبه {toPersianDigits(session.stationNumber || '۱')} - صندوق {toPersianDigits(session.boxNumber || '۱')}
               </span>
-              {isMultiVoteMode && (
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  سقف انتخاب: تا {toPersianDigits(maxAllowed)} کاندیدا
-                </span>
-              )}
+              <span className={`px-2.5 py-0.5 rounded-full text-[11px] sm:text-xs font-bold border ${
+                isMultiVoteMode 
+                  ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+              }`}>
+                {isMultiVoteMode 
+                  ? `سقف انتخاب: تا ${toPersianDigits(maxAllowed)} کاندیدا`
+                  : 'نوع رأی: تک‌انتخابی (۱ نفر)'}
+              </span>
             </div>
             <h1 className="text-lg sm:text-2xl font-black text-slate-100 tracking-tight mt-0.5 truncate max-w-[280px] sm:max-w-xl">
               {session.title || 'انتخابات رسمی'}
@@ -243,6 +345,22 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-2">
+          {/* Hide/Show Voted Candidates Toggle */}
+          <button
+            onClick={() => setHideVotedCandidates(prev => !prev)}
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl text-xs sm:text-sm font-medium border transition-colors ${
+              hideVotedCandidates
+                ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
+                : 'bg-slate-800 text-slate-400 border-slate-700'
+            }`}
+            title={hideVotedCandidates ? 'کاندیداهای رأی‌داده‌شده حذف و مخفی هستند' : 'همه کاندیداها نمایش داده می‌شوند'}
+          >
+            {hideVotedCandidates ? <EyeOff className="w-4 h-4 text-emerald-400" /> : <Eye className="w-4 h-4" />}
+            <span className="hidden md:inline">
+              {hideVotedCandidates ? 'حذف آرا داده‌شده (فعال)' : 'نمایش همه کاندیداها'}
+            </span>
+          </button>
+
           <button
             onClick={toggleFullscreen}
             className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs sm:text-sm font-medium transition-colors"
@@ -275,58 +393,71 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
               <h2 className="text-base md:text-lg font-bold text-slate-100">
                 {isMultiVoteMode 
                   ? `رأی‌دهنده گرامی، شما می‌توانید حداکثر به ${toPersianDigits(maxAllowed)} کاندیدا رأی دهید.`
-                  : 'رأی‌دهنده گرامی، لطفاً روی کاندیدای مورد نظر خود ضربه بزنید (لمس کنید).'}
+                  : 'رأی‌دهنده گرامی، این انتخابات تک‌انتخابی است؛ لطفاً ۱ کاندیدای مورد نظر خود را لمس کنید.'}
               </h2>
               <p className="text-xs md:text-sm text-slate-400 mt-0.5">
                 {isMultiVoteMode
                   ? 'کاندیداهای منتخب خود را لمس نمایید، سپس در نوار پایین دکمه «تأیید نهایی آرا» را بزنید.'
-                  : 'پس از انتخاب نامزد، پنجره تأیید باز می‌شود و می‌توانید رأی خود را نهایی کنید.'}
+                  : 'با لمس کاندیدا، پنجره تأیید باز می‌شود. در صورت انتخاب فرد دیگر اخطار داده خواهد شد.'}
               </p>
             </div>
           </div>
           
           <div className="flex items-center gap-2 self-stretch sm:self-auto justify-between sm:justify-end">
-            {isMultiVoteMode ? (
-              <div className="flex items-center gap-2 text-xs font-bold px-3 py-1.5 rounded-xl bg-indigo-950/60 text-indigo-300 border border-indigo-500/40">
-                <span>انتخاب‌های شما:</span>
-                <span className="text-emerald-400 font-mono font-black text-sm">{toPersianDigits(selectedCandidateIds.length)}</span>
-                <span>از</span>
-                <span className="text-white font-mono font-black text-sm">{toPersianDigits(maxAllowed)}</span>
-              </div>
-            ) : (
-              <div className="text-xs font-bold bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700 text-slate-300">
-                تعداد کاندیداها: {toPersianDigits(approvedCandidates.length)} نفر
-              </div>
-            )}
+            <div className="flex items-center gap-2 text-xs font-bold px-3 py-1.5 rounded-xl bg-indigo-950/60 text-indigo-300 border border-indigo-500/40">
+              <span>انتخاب‌های شما:</span>
+              <span className="text-emerald-400 font-mono font-black text-sm">{toPersianDigits(selectedCandidateIds.length)}</span>
+              <span>از</span>
+              <span className="text-white font-mono font-black text-sm">{toPersianDigits(maxAllowed)}</span>
+            </div>
+
+            <div className="text-xs font-bold bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700 text-slate-300">
+              کاندیداهای حاضر: {toPersianDigits(visibleCandidates.length)} نفر
+            </div>
           </div>
         </div>
 
-        {/* Limit Warning Alert */}
+        {/* Limit Warning Alert (Prominent Warning Message for Single & Multi choice) */}
         {limitWarning && (
-          <div className="mb-5 p-4 rounded-2xl bg-amber-500/20 border border-amber-500/50 text-amber-200 text-xs sm:text-sm font-bold flex items-center gap-3 animate-fadeIn">
-            <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0" />
-            <span className="flex-1 leading-relaxed">{limitWarning}</span>
+          <div className="mb-5 p-4 rounded-2xl bg-amber-500/20 border-2 border-amber-500/60 text-amber-200 text-xs sm:text-sm font-bold flex items-center gap-3 animate-fadeIn shadow-lg shadow-amber-950/50">
+            <AlertTriangle className="w-6 h-6 text-amber-400 flex-shrink-0 animate-bounce" />
+            <span className="flex-1 leading-relaxed text-slate-100">{limitWarning}</span>
             <button 
               onClick={() => setLimitWarning(null)}
-              className="text-amber-400 hover:text-white p-1"
+              className="text-amber-400 hover:text-white p-1 rounded-lg hover:bg-amber-500/20"
             >
-              <X className="w-4 h-4" />
+              <X className="w-5 h-5" />
             </button>
           </div>
         )}
 
         {/* Candidates Grid (Big touch-friendly cards) */}
-        {approvedCandidates.length === 0 ? (
+        {visibleCandidates.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-12 bg-slate-900/50 rounded-3xl border border-slate-800">
-            <AlertTriangle className="w-16 h-16 text-amber-400 mb-4" />
-            <h3 className="text-xl font-bold text-slate-200">کاندیدای تایید شده‌ای برای نمایش وجود ندارد</h3>
-            <p className="text-slate-400 text-sm mt-2">
-              لطفاً از طریق پنل اصلی نامزدها را ثبت و تأیید نمایید.
+            <CheckCircle2 className="w-16 h-16 text-emerald-400 mb-4" />
+            <h3 className="text-xl font-bold text-slate-200">
+              {hideVotedCandidates && approvedCandidates.length > 0
+                ? 'تمام کاندیداها رأی خود را دریافت نموده‌اند و از صفحه حذف شده‌اند.'
+                : 'کاندیدای تایید شده‌ای برای نمایش وجود ندارد'}
+            </h3>
+            <p className="text-slate-400 text-sm mt-2 max-w-md">
+              {hideVotedCandidates && approvedCandidates.length > 0
+                ? 'برای مشاهده مجدد کاندیداها، می‌توانید از دکمه بالای صفحه گزینه «نمایش همه کاندیداها» را انتخاب فرمایید.'
+                : 'لطفاً از طریق پنل اصلی نامزدها را ثبت و تأیید نمایید.'}
             </p>
+            {hideVotedCandidates && approvedCandidates.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setHideVotedCandidates(false)}
+                className="mt-4 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 text-xs font-bold"
+              >
+                نمایش همه کاندیداها
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
-            {approvedCandidates.map((cand) => {
+            {visibleCandidates.map((cand) => {
               const isSelected = selectedCandidateIds.includes(cand.id);
               const selectionIndex = selectedCandidateIds.indexOf(cand.id);
 
@@ -342,31 +473,25 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
                       : 'border-slate-800 hover:border-emerald-500/50 hover:shadow-emerald-500/10'
                   }`}
                 >
-                  {/* Selected check badge for multi mode */}
-                  {isMultiVoteMode && (
-                    <div className="absolute top-4 left-4 z-10">
-                      {isSelected ? (
-                        <div className="w-8 h-8 rounded-full bg-emerald-500 text-slate-950 font-black flex items-center justify-center shadow-lg ring-2 ring-emerald-300">
-                          <Check className="w-5 h-5 stroke-[3]" />
-                        </div>
-                      ) : (
-                        <div className="w-8 h-8 rounded-full bg-slate-800/80 border-2 border-slate-700 text-slate-500 flex items-center justify-center group-hover:border-slate-500">
-                          <span className="text-xs font-mono">+</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  {/* Selected check badge */}
+                  <div className="absolute top-4 left-4 z-10">
+                    {isSelected ? (
+                      <div className="w-8 h-8 rounded-full bg-emerald-500 text-slate-950 font-black flex items-center justify-center shadow-lg ring-2 ring-emerald-300">
+                        <Check className="w-5 h-5 stroke-[3]" />
+                      </div>
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-slate-800/80 border border-slate-700 text-slate-500 flex items-center justify-center group-hover:border-emerald-500/50 group-hover:text-emerald-400 transition-colors">
+                        <Check className="w-4 h-4 opacity-40 group-hover:opacity-100" />
+                      </div>
+                    )}
+                  </div>
 
-                  {/* Top Badge: Candidate Code & Affiliation */}
-                  <div className={`flex items-center justify-between mb-4 ${isMultiVoteMode ? 'pl-10' : ''}`}>
-                    <span className={`px-3 py-1 rounded-xl text-xs sm:text-sm font-black font-mono border ${
-                      isSelected 
-                        ? 'bg-emerald-500 text-slate-950 border-emerald-400' 
-                        : 'bg-slate-800 group-hover:bg-emerald-500/20 text-emerald-400 border-slate-700 group-hover:border-emerald-500/30'
-                    }`}>
+                  {/* Candidate Code Tag & Affiliation */}
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="px-2.5 py-1 rounded-xl bg-slate-800 text-emerald-400 font-mono text-xs font-black border border-slate-700">
                       کد {toPersianDigits(cand.candidateNumber)}
                     </span>
-                    <span className="text-xs text-slate-400 truncate max-w-[130px]">
+                    <span className="text-[11px] text-slate-400 truncate max-w-[130px]">
                       {cand.affiliation || 'مستقل'}
                     </span>
                   </div>
@@ -436,76 +561,74 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
         )}
       </main>
 
-      {/* Floating Bottom Bar for Multi-Vote Mode */}
-      {isMultiVoteMode && (
-        <div className="fixed bottom-0 inset-x-0 z-40 bg-slate-900/95 border-t border-emerald-500/40 backdrop-blur-xl px-4 py-3 sm:py-4 shadow-2xl">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
-            {/* Status & selected list */}
-            <div className="flex items-center gap-3 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-              <div className="flex items-center gap-2 bg-slate-800 px-3 py-2 rounded-xl border border-slate-700 flex-shrink-0">
-                <span className="text-xs text-slate-300">وضعیت انتخاب:</span>
-                <span className="font-mono font-black text-base text-emerald-400">
-                  {toPersianDigits(selectedCandidateIds.length)} / {toPersianDigits(maxAllowed)}
-                </span>
-              </div>
-
-              {/* Chips of selected candidates */}
-              <div className="flex items-center gap-1.5 flex-nowrap overflow-x-auto">
-                {selectedCandidates.map(c => (
-                  <span
-                    key={c.id}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-bold flex-shrink-0"
-                  >
-                    <span>{c.name}</span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedCandidateIds(prev => prev.filter(id => id !== c.id));
-                      }}
-                      className="hover:text-red-300"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </span>
-                ))}
-              </div>
+      {/* Floating Bottom Bar (For both Single and Multi mode) */}
+      <div className="fixed bottom-0 inset-x-0 z-40 bg-slate-900/95 border-t border-emerald-500/40 backdrop-blur-xl px-4 py-3 sm:py-4 shadow-2xl">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
+          {/* Status & selected list */}
+          <div className="flex items-center gap-3 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+            <div className="flex items-center gap-2 bg-slate-800 px-3 py-2 rounded-xl border border-slate-700 flex-shrink-0">
+              <span className="text-xs text-slate-300">وضعیت انتخاب:</span>
+              <span className="font-mono font-black text-base text-emerald-400">
+                {toPersianDigits(selectedCandidateIds.length)} / {toPersianDigits(maxAllowed)}
+              </span>
             </div>
 
-            {/* Action buttons */}
-            <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
-              {selectedCandidateIds.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleClearAllSelections}
-                  className="px-3 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 transition"
-                  title="پاک کردن همه انتخاب‌ها"
+            {/* Chips of selected candidates */}
+            <div className="flex items-center gap-1.5 flex-nowrap overflow-x-auto">
+              {selectedCandidates.map(c => (
+                <span
+                  key={c.id}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-bold flex-shrink-0"
                 >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
-              )}
-
-              <button
-                type="button"
-                disabled={selectedCandidateIds.length === 0}
-                onClick={() => setIsConfirmModalOpen(true)}
-                className={`flex-1 sm:flex-initial py-3.5 px-6 rounded-2xl font-black text-sm sm:text-base flex items-center justify-center gap-2 shadow-xl transition-all ${
-                  selectedCandidateIds.length > 0
-                    ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-900/40 active:scale-95'
-                    : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-60'
-                }`}
-              >
-                <CheckCircle2 className="w-5 h-5 text-emerald-200" />
-                <span>
-                  {selectedCandidateIds.length === 0 
-                    ? 'حداقل ۱ کاندیدا انتخاب کنید'
-                    : `تأیید و ثبت نهایی آرا (${toPersianDigits(selectedCandidateIds.length)} نفر)`}
+                  <span>{c.name}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedCandidateIds(prev => prev.filter(id => id !== c.id));
+                    }}
+                    className="hover:text-red-300 p-0.5"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 </span>
-              </button>
+              ))}
             </div>
           </div>
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+            {selectedCandidateIds.length > 0 && (
+              <button
+                type="button"
+                onClick={handleClearAllSelections}
+                className="px-3 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 transition"
+                title="پاک کردن انتخاب‌ها"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </button>
+            )}
+
+            <button
+              type="button"
+              disabled={selectedCandidateIds.length === 0}
+              onClick={() => setIsConfirmModalOpen(true)}
+              className={`flex-1 sm:flex-initial py-3.5 px-6 rounded-2xl font-black text-sm sm:text-base flex items-center justify-center gap-2 shadow-xl transition-all ${
+                selectedCandidateIds.length > 0
+                  ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-900/40 active:scale-95'
+                  : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-60'
+              }`}
+            >
+              <CheckCircle2 className="w-5 h-5 text-emerald-200" />
+              <span>
+                {selectedCandidateIds.length === 0 
+                  ? (isMultiVoteMode ? 'حداقل ۱ کاندیدا انتخاب کنید' : 'یک کاندیدا را لمس کنید')
+                  : `تأیید و ثبت نهایی آرا (${toPersianDigits(selectedCandidateIds.length)} نفر)`}
+              </span>
+            </button>
+          </div>
         </div>
-      )}
+      </div>
 
       {/* Confirmation Modal */}
       {isConfirmModalOpen && selectedCandidates.length > 0 && (
@@ -519,11 +642,16 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
 
             <p className="text-xs md:text-sm text-slate-400 mb-4 leading-relaxed">
               با فشردن کلید تأیید، رأی شما به صورت رسمی و قطعی در صندوق الکترونیک به ثبت می‌رسد.
+              {hideVotedCandidates && (
+                <span className="block text-emerald-400 mt-1 font-bold">
+                  * کاندیداهای منتخب پس از ثبت، از صفحه مانیتور لمسی حذف خواهند شد.
+                </span>
+              )}
             </p>
 
             {/* Candidates Preview List / Cards */}
             <div className="flex-1 overflow-y-auto space-y-2.5 my-2 p-2 bg-slate-950/60 rounded-2xl border border-slate-800 max-h-64">
-              {selectedCandidates.map((cand, idx) => (
+              {selectedCandidates.map((cand) => (
                 <div 
                   key={cand.id} 
                   className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800 text-right"
@@ -548,26 +676,33 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
                     <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 font-mono text-xs font-bold border border-emerald-500/30">
                       کد {toPersianDigits(cand.candidateNumber)}
                     </span>
-                    {isMultiVoteMode && (
-                      <span className="w-6 h-6 rounded-full bg-slate-800 text-slate-400 text-xs flex items-center justify-center font-bold">
-                        {toPersianDigits(idx + 1)}
-                      </span>
-                    )}
                   </div>
                 </div>
               ))}
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-3 mt-4 pt-3 border-t border-slate-800">
+            {/* Modal Actions */}
+            <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-slate-800">
               <button
+                disabled={isSubmittingVote}
                 onClick={handleConfirmVote}
-                className="flex-1 py-4 px-6 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-base sm:text-lg shadow-xl shadow-emerald-900/40 flex items-center justify-center gap-2 active:scale-95 transition-all"
+                className="flex-1 py-4 px-6 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-base shadow-xl shadow-emerald-900/40 active:scale-95 transition-all flex items-center justify-center gap-2"
               >
-                <CheckCircle2 className="w-6 h-6 text-emerald-200" />
-                <span>تأیید نهایی و ثبت آرا</span>
+                {isSubmittingVote ? (
+                  <>
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                    <span>در حال ثبت قطعی رأی در شبکه...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-6 h-6 text-white" />
+                    <span>تأیید نهایی و ثبت در صندوق</span>
+                  </>
+                )}
               </button>
 
               <button
+                disabled={isSubmittingVote}
                 onClick={() => setIsConfirmModalOpen(false)}
                 className="py-4 px-6 rounded-2xl bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-sm sm:text-base border border-slate-700 active:scale-95 transition-all"
               >

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Candidate, 
   ElectionSession, 
@@ -187,6 +187,7 @@ export default function App() {
     return 'master';
   });
   const [isNetworkHubModalOpen, setIsNetworkHubModalOpen] = useState(false);
+  const processedVoteIdsRef = useRef<Set<string>>(new Set());
 
   // Sync to local storage
   useEffect(() => {
@@ -452,32 +453,62 @@ export default function App() {
         }
       }
 
-      // 3.1 Multiple Votes Cast from Touchscreen Kiosk
+      // 3.1 Multiple Votes Cast from Touchscreen Kiosk or Mobile Phone
       if (msg.type === 'KIOSK_MULTIPLE_VOTES_CAST' && msg.payload) {
-        const { candidateIds, candidates: chosenList } = msg.payload;
+        const { candidateIds, candidates: chosenList, voterId, voteId, source, stationName } = msg.payload;
+        
+        // Check for duplicate delivery (if already handled via REST or WS)
+        if (voteId && processedVoteIdsRef.current.has(voteId)) {
+          return;
+        }
+        if (voteId) {
+          processedVoteIdsRef.current.add(voteId);
+        }
+
         if (Array.isArray(candidateIds) && candidateIds.length > 0) {
           setCandidates((prev) =>
             prev.map((c) => (candidateIds.includes(c.id) ? { ...c, votes: c.votes + 1 } : c))
           );
 
+          // If a registered voter ID is attached to this ballot, update voter status
+          if (voterId) {
+            setVoters((prev) =>
+              prev.map((v) =>
+                v.id === voterId
+                  ? { ...v, hasVoted: true, votedAt: formatJalali(new Date(), true) }
+                  : v
+              )
+            );
+          }
+
           if (stationRole === 'master') {
             audioFeedback.playVoteCast();
-            showFlash(`${toPersianDigits(candidateIds.length)} رأی همزمان از کیوسک لمسی ثبت شد.`);
-            if (Array.isArray(chosenList)) {
-              for (const cand of chosenList) {
-                await appendAuditEvent({
-                  operatorName: 'کیوسک لمسی دیجیتال (باجه ۱)',
-                  operatorRole: 'صندوق الکترونیک اخذ رأی',
-                  candidateId: cand.id,
-                  candidateName: cand.name,
-                  candidateNumber: cand.code,
-                  actionType: 'VOTE_INCREMENT',
-                  previousValue: null,
-                  newValue: 'رأی چندانتخابی کیوسک',
-                  delta: 1,
-                  reason: `ثبت همزمان آرای شهروند در برگه چند انتخابی کیوسک دیجیتال (${toPersianDigits(candidateIds.length)} انتخاب)`,
-                });
-              }
+            const isMobile = source === 'mobile' || !!voterId;
+            showFlash(
+              isMobile
+                ? `${toPersianDigits(candidateIds.length)} رأی جدید از تلفن همراه (اسکن بارکد) در پنل اصلی ثبت شد.`
+                : `${toPersianDigits(candidateIds.length)} رأی جدید از کیوسک لمسی در پنل اصلی ثبت شد.`
+            );
+
+            const chosen = Array.isArray(chosenList) && chosenList.length > 0 
+              ? chosenList 
+              : candidates.filter(c => candidateIds.includes(c.id)).map(c => ({ id: c.id, name: c.name, code: c.candidateNumber }));
+
+            for (const cand of chosen) {
+              await appendAuditEvent({
+                operatorName: stationName || (isMobile ? 'گوشی همراه رأی‌دهنده (اسکن بارکد)' : 'کیوسک لمسی دیجیتال (باجه ۱)'),
+                operatorRole: isMobile ? 'سامانه برگه رأی هوشمند موبایل' : 'صندوق الکترونیک اخذ رأی',
+                candidateId: cand.id,
+                candidateName: cand.name,
+                candidateNumber: cand.code || cand.candidateNumber,
+                actionType: 'VOTE_INCREMENT',
+                previousValue: null,
+                newValue: 'ثبت الکترونیک برگه رأی',
+                delta: 1,
+                reason: isMobile 
+                  ? `ثبت آنلاین رأی توسط شهروند از طریق گوشی هوشمند (اسکن بارکد اختصاصی باجه ورود)`
+                  : `ثبت رأی در کیوسک دیجیتال مانیتور لمسی (${toPersianDigits(candidateIds.length)} کاندیدا)`,
+              });
             }
           }
         }
@@ -503,6 +534,89 @@ export default function App() {
       unsubscribe();
     };
   }, [stationRole, session, candidates, voters, currentOperator]);
+
+  // Push full state from Master to server cache
+  useEffect(() => {
+    if (stationRole === 'master') {
+      syncEngine.pushFullStateToServer({
+        session,
+        candidates,
+        voters,
+      });
+    }
+  }, [stationRole, session, candidates, voters]);
+
+  // Fetch full state on startup for non-master stations (kiosk, phone)
+  useEffect(() => {
+    if (stationRole !== 'master') {
+      syncEngine.fetchLatestServerState().then((serverState) => {
+        if (serverState) {
+          if (serverState.session) setSession(serverState.session);
+          if (serverState.candidates) setCandidates(serverState.candidates);
+          if (serverState.voters) setVoters(serverState.voters);
+        }
+      });
+    }
+  }, [stationRole]);
+
+  // Backup polling on Master station to catch any votes from server queue
+  useEffect(() => {
+    if (stationRole !== 'master') return;
+
+    const interval = setInterval(async () => {
+      try {
+        const pendingVotes = await syncEngine.pullPendingVotes();
+        for (const vote of pendingVotes) {
+          if (vote && vote.id && !processedVoteIdsRef.current.has(vote.id)) {
+            processedVoteIdsRef.current.add(vote.id);
+            const { candidateIds, voterId, source, stationName } = vote;
+            if (Array.isArray(candidateIds) && candidateIds.length > 0) {
+              setCandidates((prev) =>
+                prev.map((c) => (candidateIds.includes(c.id) ? { ...c, votes: c.votes + 1 } : c))
+              );
+
+              if (voterId) {
+                setVoters((prev) =>
+                  prev.map((vt) =>
+                    vt.id === voterId
+                      ? { ...vt, hasVoted: true, votedAt: formatJalali(new Date(), true) }
+                      : vt
+                  )
+                );
+              }
+
+              audioFeedback.playVoteCast();
+              showFlash(
+                source === 'mobile' || !!voterId
+                  ? `${toPersianDigits(candidateIds.length)} رأی جدید از تلفن همراه (اسکن بارکد) در پنل اصلی ثبت شد.`
+                  : `${toPersianDigits(candidateIds.length)} رأی از کیوسک در پنل اصلی ثبت شد.`
+              );
+
+              const chosen = candidates.filter((c) => candidateIds.includes(c.id));
+              for (const cand of chosen) {
+                await appendAuditEvent({
+                  operatorName: stationName || 'گوشی همراه رأی‌دهنده (اسکن بارکد)',
+                  operatorRole: 'صندوق الکترونیک اخذ رأی شبکه',
+                  candidateId: cand.id,
+                  candidateName: cand.name,
+                  candidateNumber: cand.candidateNumber,
+                  actionType: 'VOTE_INCREMENT',
+                  previousValue: null,
+                  newValue: 'ثبت رأی برخط موبایل',
+                  delta: 1,
+                  reason: `ثبت مطمئن رأی توسط مراجع از طریق گوشی همراه (اسکن بارکد اختصاصی)`,
+                });
+              }
+            }
+          }
+        }
+      } catch {
+        // ignore polling network errors
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [stationRole, candidates]);
 
   // Vote Increment (+1, +5)
   const handleIncrementVote = async (candidateId: string, amount: number) => {

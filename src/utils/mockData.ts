@@ -177,6 +177,7 @@ export function createInitialSession(): ElectionSession {
     blankBallots: 4,   // آرای باطله سفید
     invalidBallots: 2, // آرای باطله خط‌خورده
     maxVotesPerVoter: 1, // پیش‌فرض: تک انتخابی
+    hideVotedCandidatesInKiosk: true, // حذف کاندیداهای رأی‌داده‌شده از کیوسک لمسی
     presidingOfficer: {
       id: 'OFF-01',
       name: 'مهندس سید رضا علوی',

@@ -115,7 +115,91 @@ app.get('/api/network/info', (req, res) => {
   });
 });
 
-// State API endpoint
+// In-memory queue of votes to guarantee synchronization across all devices
+const recentVotesQueue: Array<{
+  id: string;
+  candidateIds: string[];
+  voterId?: string;
+  source: string;
+  stationName: string;
+  timestamp: string;
+}> = [];
+
+// Voting API endpoint for reliable mobile phone & kiosk vote submission
+app.post('/api/sync/vote', (req, res) => {
+  const { candidateIds, voterId, source = 'mobile', stationName = 'گوشی همراه رأی‌دهنده' } = req.body;
+  if (!Array.isArray(candidateIds) || candidateIds.length === 0) {
+    return res.status(400).json({ error: 'candidateIds array is required' });
+  }
+
+  const voteEvent = {
+    id: 'vote_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+    candidateIds,
+    voterId,
+    source,
+    stationName,
+    timestamp: new Date().toISOString(),
+  };
+
+  recentVotesQueue.push(voteEvent);
+  // Keep last 100 votes in memory
+  if (recentVotesQueue.length > 100) {
+    recentVotesQueue.shift();
+  }
+
+  // Update cached election state if available
+  if (cachedElectionState && Array.isArray(cachedElectionState.candidates)) {
+    cachedElectionState.candidates = cachedElectionState.candidates.map((c: any) =>
+      candidateIds.includes(c.id) ? { ...c, votes: (c.votes || 0) + 1 } : c
+    );
+
+    if (voterId && Array.isArray(cachedElectionState.voters)) {
+      cachedElectionState.voters = cachedElectionState.voters.map((v: any) =>
+        v.id === voterId ? { ...v, hasVoted: true, votedAt: new Date().toLocaleTimeString('fa-IR') } : v
+      );
+    }
+  }
+
+  // Broadcast to all active WebSocket clients (including Master panel)
+  const broadcastMsg = JSON.stringify({
+    type: 'KIOSK_MULTIPLE_VOTES_CAST',
+    senderId: 'server_api',
+    senderRole: 'kiosk',
+    senderName: stationName,
+    timestamp: voteEvent.timestamp,
+    payload: {
+      voteId: voteEvent.id,
+      candidateIds,
+      voterId,
+      source,
+    },
+  });
+
+  for (const client of clients) {
+    if (client.readyState === WebSocket.OPEN) {
+      try {
+        client.send(broadcastMsg);
+      } catch (e) {
+        console.warn('Error broadcasting vote over WS', e);
+      }
+    }
+  }
+
+  console.log(`[API Vote] Successfully processed vote for ${candidateIds.length} candidate(s) from ${source} (${stationName})`);
+  return res.json({ success: true, voteId: voteEvent.id, timestamp: voteEvent.timestamp });
+});
+
+// Endpoint for master to pull any missed votes since a specific time
+app.get('/api/sync/pending-votes', (req, res) => {
+  const since = req.query.since as string;
+  if (!since) {
+    return res.json({ votes: recentVotesQueue });
+  }
+  const filtered = recentVotesQueue.filter(v => v.timestamp > since);
+  return res.json({ votes: filtered });
+});
+
+// State API endpoints for full state synchronization across all connected devices
 app.get('/api/sync/state', (_req, res) => {
   res.json({
     hasState: !!cachedElectionState,
@@ -136,11 +220,16 @@ app.post('/api/sync/state', (req, res) => {
   });
   for (const client of clients) {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(broadcastMsg);
+      try {
+        client.send(broadcastMsg);
+      } catch (e) {
+        console.warn('Error broadcasting state to client', e);
+      }
     }
   }
   res.json({ success: true, timestamp: new Date().toISOString() });
 });
+
 
 // Configure Vite middleware in development, or static in production
 const isProduction = process.env.NODE_ENV === 'production';

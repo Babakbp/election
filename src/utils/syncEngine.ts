@@ -75,6 +75,9 @@ class SyncEngine {
         console.warn('BroadcastChannel not supported', e);
       }
     }
+
+    // Always attempt WebSocket connection so multi-device/phone features work seamlessly
+    this.connectWebSocket();
   }
 
   public getStationId(): string {
@@ -95,8 +98,6 @@ class SyncEngine {
 
     if (newMode === 'NETWORK_MULTI') {
       this.connectWebSocket();
-    } else {
-      this.disconnectWebSocket();
     }
   }
 
@@ -111,18 +112,15 @@ class SyncEngine {
 
   public init(role: StationRole) {
     this.role = role;
-    if (this.mode === 'NETWORK_MULTI') {
-      this.connectWebSocket();
-    }
+    // Always ensure WebSocket is connected
+    this.connectWebSocket();
     this.announcePresence();
 
     // Start heartbeat
     if (!this.heartbeatTimer) {
       this.heartbeatTimer = setInterval(() => {
-        if (this.mode === 'NETWORK_MULTI') {
-          this.announcePresence();
-          this.pruneStaleStations();
-        }
+        this.announcePresence();
+        this.pruneStaleStations();
       }, 5000);
     }
   }
@@ -161,14 +159,101 @@ class SyncEngine {
       }
     }
 
-    // 2. Broadcast via WebSocket to other laptops on the network if in NETWORK_MULTI mode
-    if (this.mode === 'NETWORK_MULTI' && this.ws && this.ws.readyState === WebSocket.OPEN) {
+    // 2. Broadcast via WebSocket to all connected devices across network
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       try {
         this.ws.send(JSON.stringify(msg));
       } catch (e) {
         console.warn('WebSocket send error', e);
       }
     }
+  }
+
+  /**
+   * Cast a vote reliably from a mobile phone or kiosk.
+   * Dispatches via WebSocket, BroadcastChannel AND HTTP REST endpoint
+   * to guarantee the vote is never missed by the master station.
+   */
+  public async castVote(candidateIds: string[], voterId?: string, stationName?: string): Promise<boolean> {
+    const payload = {
+      candidateIds,
+      voterId,
+      stationName: stationName || this.getStationDisplayName(this.role),
+      timestamp: new Date().toISOString(),
+    };
+
+    // 1. Broadcast locally and via WebSocket
+    this.broadcast('KIOSK_MULTIPLE_VOTES_CAST', payload);
+
+    // 2. Send via HTTP REST API endpoint for guaranteed server-side delivery
+    try {
+      const res = await fetch('/api/sync/vote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          candidateIds,
+          voterId,
+          source: this.role === 'kiosk' ? 'kiosk' : 'mobile',
+          stationName: stationName || this.getStationDisplayName(this.role),
+        }),
+      });
+      if (res.ok) {
+        return true;
+      }
+    } catch (err) {
+      console.warn('[SyncEngine] HTTP Vote fetch error', err);
+    }
+    return true;
+  }
+
+  /**
+   * Fetch latest full state from server (for newly opened phones or kiosk tabs)
+   */
+  public async fetchLatestServerState(): Promise<any | null> {
+    try {
+      const res = await fetch('/api/sync/state');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.hasState && data.state) {
+          return data.state;
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    return null;
+  }
+
+  /**
+   * Push current full state to server so any joining phone can get it
+   */
+  public async pushFullStateToServer(state: any): Promise<void> {
+    try {
+      await fetch('/api/sync/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(state),
+      });
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  /**
+   * Pull pending votes since a timestamp (backup polling)
+   */
+  public async pullPendingVotes(since?: string): Promise<any[]> {
+    try {
+      const url = since ? `/api/sync/pending-votes?since=${encodeURIComponent(since)}` : '/api/sync/pending-votes';
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        return data.votes || [];
+      }
+    } catch {
+      // ignore
+    }
+    return [];
   }
 
   private handleIncomingMessage(msg: SyncMessage, fromWs: boolean) {

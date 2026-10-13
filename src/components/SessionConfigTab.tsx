@@ -55,6 +55,7 @@ export const SessionConfigTab: React.FC<SessionConfigTabProps> = ({
   const [boxNumber, setBoxNumber] = useState(session.boxNumber);
   const [registeredVotersCount, setRegisteredVotersCount] = useState(session.registeredVotersCount);
   const [maxVotesPerVoter, setMaxVotesPerVoter] = useState(session.maxVotesPerVoter || 1);
+  const [hideVotedCandidatesInKiosk, setHideVotedCandidatesInKiosk] = useState(session.hideVotedCandidatesInKiosk !== false);
   const [tieBreakerRule, setTieBreakerRule] = useState<TieBreakerRule>(session.tieBreakerRule);
   const [actionReason, setActionReason] = useState('');
   const [modalStatusChange, setModalStatusChange] = useState<SessionStatus | null>(null);
@@ -153,6 +154,7 @@ export const SessionConfigTab: React.FC<SessionConfigTabProps> = ({
         boxNumber,
         registeredVotersCount: Number(registeredVotersCount) || 0,
         maxVotesPerVoter: Math.max(1, Number(maxVotesPerVoter) || 1),
+        hideVotedCandidatesInKiosk,
         tieBreakerRule,
       },
       'بروزرسانی مشخصات و تنظیمات عمومی جلسه انتخابات'
@@ -447,6 +449,39 @@ export const SessionConfigTab: React.FC<SessionConfigTabProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* Hide Voted Candidates in Touch Kiosk / Mobile (حذف کاندیداهای رأی‌داده‌شده) */}
+            <div className="p-3.5 bg-slate-900/60 border border-slate-800 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div>
+                <div className="text-xs font-bold text-slate-200 flex items-center gap-2">
+                  <span>حذف و عدم نمایش کاندیداهای رأی‌داده‌شده در صفحه لمسی:</span>
+                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                    hideVotedCandidatesInKiosk 
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
+                      : 'bg-slate-800 text-slate-400 border border-slate-700'
+                  }`}>
+                    {hideVotedCandidatesInKiosk ? 'فعال (حذف کاندیدا پس از اخذ رأی)' : 'غیرفعال (نمایش همه)'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                  با فعال بودن این گزینه، در مانیتور لمسی و صفحه رأی موبایل، کاندیدایی که به او رأی داده می‌شود بلافاصله از صفحه حذف و دیگر دیده نمی‌شود تا از رأی مجدد به ایشان جلوگیری گردد.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                disabled={isLocked}
+                onClick={() => setHideVotedCandidatesInKiosk(!hideVotedCandidatesInKiosk)}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex-shrink-0 active:scale-95 ${
+                  hideVotedCandidatesInKiosk
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-900/30'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                }`}
+              >
+                {hideVotedCandidatesInKiosk ? 'فعال (حذف خودکار پس از رأی)' : 'غیرفعال (نمایش دائمی کاندیداها)'}
+              </button>
+            </div>
+
 
             {/* Tie-breaker Rule Selector */}
             <div className="p-3 bg-indigo-950/30 border border-indigo-500/30 rounded-xl space-y-2">

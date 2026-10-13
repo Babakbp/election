@@ -80,6 +80,19 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [customHost, setCustomHost] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
+  const [networkIp, setNetworkIp] = useState<string>('');
+
+  // Fetch local network IP for mobile device compatibility
+  useEffect(() => {
+    fetch('/api/network/info')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.primaryIp && data.primaryIp !== 'localhost') {
+          setNetworkIp(data.primaryIp);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
 
@@ -106,18 +119,26 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
     }
   }, [isQuickRegisterOpen, isMobileQrModalOpen]);
 
-  // Compute mobile voting URL
+  // Compute mobile voting URL using network IP if available so smartphones on Wi-Fi can open it
   const mobileVotingUrl = useMemo(() => {
     if (typeof window === 'undefined') return '';
-    const base = customHost.trim() || `${window.location.protocol}//${window.location.host}${window.location.pathname}`;
-    const cleanBase = base.endsWith('/') ? base : base;
-    const url = new URL(cleanBase.startsWith('http') ? cleanBase : `http://${cleanBase}`);
+    let hostToUse = window.location.host;
+    if (customHost.trim()) {
+      hostToUse = customHost.trim();
+    } else if (networkIp && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      const port = window.location.port || '3000';
+      hostToUse = `${networkIp}:${port}`;
+    }
+
+    const protocol = window.location.protocol;
+    const base = hostToUse.startsWith('http') ? hostToUse : `${protocol}//${hostToUse}${window.location.pathname}`;
+    const url = new URL(base);
     url.searchParams.set('station', 'kiosk');
     if (currentVoterForQr) {
       url.searchParams.set('voter', currentVoterForQr.id);
     }
     return url.toString();
-  }, [customHost, currentVoterForQr]);
+  }, [customHost, currentVoterForQr, networkIp]);
 
   // Generate QR code when modal opens or url changes
   useEffect(() => {
