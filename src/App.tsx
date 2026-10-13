@@ -51,6 +51,10 @@ import { ManualTallySheetModal } from './components/ManualTallySheetModal';
 import { ElectionGuideModal } from './components/ElectionGuideModal';
 import { SessionsArchiveTab } from './components/SessionsArchiveTab';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { TouchVotingKiosk } from './components/TouchVotingKiosk';
+import { VoterCheckinTerminal } from './components/VoterCheckinTerminal';
+import { NetworkHubModal } from './components/NetworkHubModal';
+import { syncEngine, OperatingMode, StationRole, SyncMessage } from './utils/syncEngine';
 import { getAppPasswordInfo, getLicenseStatus, CREATOR_NAME, CREATOR_EMAIL } from './utils/license';
 import { archiveSession, getArchivedSessions } from './utils/fileBackupStorage';
 
@@ -171,6 +175,18 @@ export default function App() {
   const [isAppLocked, setIsAppLocked] = useState(() => getAppPasswordInfo().isLocked);
   const [licenseData, setLicenseData] = useState(() => getLicenseStatus());
   const [flashMessage, setFlashMessage] = useState<string | null>(null);
+
+  // Operating mode & Station Role
+  const [operatingMode, setOperatingMode] = useState<OperatingMode>(() => syncEngine.getMode());
+  const [stationRole, setStationRole] = useState<StationRole>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const s = params.get('station');
+      if (s === 'kiosk' || s === 'checkin' || s === 'projector') return s as StationRole;
+    }
+    return 'master';
+  });
+  const [isNetworkHubModalOpen, setIsNetworkHubModalOpen] = useState(false);
 
   // Sync to local storage
   useEffect(() => {
@@ -317,6 +333,145 @@ export default function App() {
     setAuditEvents((prev) => [fullEvent, ...prev]);
     return fullEvent;
   };
+
+  // Operating mode & Station Role Handlers
+  const handleSelectMode = (newMode: OperatingMode) => {
+    setOperatingMode(newMode);
+    syncEngine.setMode(newMode);
+    if (newMode === 'NETWORK_MULTI') {
+      showFlash('روش ۲: شبکه محلی، چندکاربره و کیوسک لمسی با موفقیت فعال شد.');
+    } else {
+      showFlash('روش ۱: سامانه به حالت مستقل (تک‌سیستمه و آفلاین) بازگردانده شد.');
+    }
+  };
+
+  const handleSelectStationRole = (newRole: StationRole) => {
+    setStationRole(newRole);
+    syncEngine.setRole(newRole);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (newRole === 'master') {
+        url.searchParams.delete('station');
+      } else {
+        url.searchParams.set('station', newRole);
+      }
+      window.history.replaceState({}, '', url.toString());
+    }
+  };
+
+  const handleAddVoterQuick = async (voterData: Omit<Voter, 'id' | 'rowNumber' | 'hasVoted'>) => {
+    const nextRow = voters.length + 1;
+    const newV: Voter = {
+      id: `VOTER-${Date.now()}`,
+      rowNumber: nextRow,
+      ...voterData,
+      hasVoted: true,
+      votedAt: formatJalali(new Date(), true),
+    };
+
+    setVoters((prev) => [...prev, newV]);
+    syncEngine.broadcast('VOTER_ADD', newV);
+
+    await appendAuditEvent({
+      operatorName: currentOperator.name || 'اپراتور باجه',
+      operatorRole: currentOperator.role || 'مسئول پذیرش',
+      actionType: 'VOTER_CHECKED_IN',
+      previousValue: null,
+      newValue: `ثبت فوری: ${newV.fullName}`,
+      delta: null,
+      reason: `ثبت‌نام مراجع جدید در باجه ورود و صدور تعرفه برای ایشان`,
+    });
+  };
+
+  // Real-time Multi-Station Sync Effect
+  useEffect(() => {
+    syncEngine.init(stationRole);
+
+    const unsubscribe = syncEngine.subscribe(async (msg: SyncMessage) => {
+      // 1. Voter checked in from Laptop 2 (Registration Desk)
+      if (msg.type === 'VOTER_CHECK_IN' && msg.payload) {
+        const { voterId, voterName, newStatus, operatorName } = msg.payload;
+        setVoters((prev) =>
+          prev.map((v) =>
+            v.id === voterId
+              ? {
+                  ...v,
+                  hasVoted: newStatus !== undefined ? newStatus : true,
+                  votedAt: formatJalali(new Date(), true),
+                }
+              : v
+          )
+        );
+
+        if (stationRole === 'master') {
+          audioFeedback.playVoterCheckin();
+          showFlash(`ورود «${voterName || 'رأی‌دهنده'}» از باجه پذیرش (لپ‌تاپ ۲) ثبت شد.`);
+          await appendAuditEvent({
+            operatorName: operatorName || 'اپراتور باجه پذیرش (لپ‌تاپ ۲)',
+            operatorRole: 'مسئول ثبت ورود وای‌فای',
+            actionType: 'BALLOT_BLANK_CHANGE',
+            previousValue: 'عدم حضور',
+            newValue: 'احراز هویت و صدور برگه رأی',
+            delta: null,
+            reason: `ثبت ورود آنلاین رأی‌دهنده: ${voterName || voterId} از باجه شبکه`,
+          });
+        }
+      }
+
+      // 2. New voter added from checkin terminal
+      if (msg.type === 'VOTER_ADD' && msg.payload) {
+        const newV = msg.payload as Voter;
+        setVoters((prev) => {
+          if (prev.some((v) => v.id === newV.id)) return prev;
+          return [...prev, newV];
+        });
+      }
+
+      // 3. Vote cast from Touchscreen Kiosk
+      if (msg.type === 'KIOSK_VOTE_CAST' && msg.payload) {
+        const { candidateId, candidateName, candidateNumber } = msg.payload;
+        setCandidates((prev) =>
+          prev.map((c) => (c.id === candidateId ? { ...c, votes: c.votes + 1 } : c))
+        );
+
+        if (stationRole === 'master') {
+          audioFeedback.playVoteCast();
+          showFlash(`یک رأی جدید برای «${candidateName || 'کاندیدا'}» از کیوسک لمسی ثبت شد.`);
+          await appendAuditEvent({
+            operatorName: 'کیوسک لمسی دیجیتال (باجه ۱)',
+            operatorRole: 'صندوق الکترونیک اخذ رأی',
+            candidateId,
+            candidateName,
+            candidateNumber,
+            actionType: 'VOTE_INCREMENT',
+            previousValue: null,
+            newValue: 'رأی مستقیم لمسی',
+            delta: 1,
+            reason: `ثبت رأی مستقیم شهروند توسط مانیتور لمسی کیوسک دیجیتال`,
+          });
+        }
+      }
+
+      // 4. State synchronization
+      if (msg.type === 'REQUEST_FULL_STATE' && stationRole === 'master') {
+        syncEngine.broadcast('FULL_STATE_SYNC', {
+          session,
+          candidates,
+          voters,
+        });
+      }
+
+      if (msg.type === 'FULL_STATE_SYNC' && msg.payload && stationRole !== 'master') {
+        if (msg.payload.session) setSession(msg.payload.session);
+        if (msg.payload.candidates) setCandidates(msg.payload.candidates);
+        if (msg.payload.voters) setVoters(msg.payload.voters);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [stationRole, session, candidates, voters, currentOperator]);
 
   // Vote Increment (+1, +5)
   const handleIncrementVote = async (candidateId: string, amount: number) => {
@@ -992,6 +1147,56 @@ export default function App() {
     showFlash('دوره قبلی در بایگانی ذخیره شد و جلسه جدید با موفقیت آغاز گردید.');
   };
 
+  // 1. Dedicated Kiosk Screen (Touchscreen for Voters)
+  if (stationRole === 'kiosk') {
+    return (
+      <ErrorBoundary fallbackTitle="خطا در اجرای کیوسک لمسی اخذ رأی">
+        <TouchVotingKiosk
+          session={session}
+          candidates={candidates}
+          onVoteCast={(candId) => handleIncrementVote(candId, 1)}
+          onExitKiosk={() => handleSelectStationRole('master')}
+        />
+      </ErrorBoundary>
+    );
+  }
+
+  // 2. Dedicated Check-in Terminal Screen (Laptop 2 for Registration Desk)
+  if (stationRole === 'checkin') {
+    return (
+      <ErrorBoundary fallbackTitle="خطا در اجرای باجه ثبت ورود واجدین شرایط">
+        <VoterCheckinTerminal
+          session={session}
+          voters={voters}
+          currentOperator={currentOperator}
+          isLocked={session.status === 'LOCKED_FINAL'}
+          onToggleVoterStatus={handleToggleVoterStatus}
+          onAddVoter={handleAddVoterQuick}
+          onExitTerminal={() => handleSelectStationRole('master')}
+        />
+      </ErrorBoundary>
+    );
+  }
+
+  // 3. Dedicated Live Projector View
+  if (stationRole === 'projector') {
+    return (
+      <ErrorBoundary fallbackTitle="خطا در نمایش پروژکتور سالن">
+        <div className="min-h-screen bg-slate-950">
+          <ProjectorViewModal
+            isOpen={true}
+            onClose={() => handleSelectStationRole('master')}
+            session={session}
+            rankedCandidates={rankedCandidates}
+            recentAuditEvents={auditEvents.slice(0, 6)}
+            totalVotes={totalVotes}
+            totalValidVotes={totalValidVotes}
+          />
+        </div>
+      </ErrorBoundary>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-white print:bg-white print:text-black print:min-h-0" dir="rtl">
       
@@ -1009,8 +1214,45 @@ export default function App() {
         onOpenGuide={() => setIsGuideModalOpen(true)}
         onOpenBackup={() => setIsBackupModalOpen(true)}
         onNavigateToArchive={() => setActiveTab('ARCHIVE')}
+        onOpenNetworkHub={() => setIsNetworkHubModalOpen(true)}
+        operatingMode={operatingMode}
         archivedCount={archivedSessions.length}
       />
+
+      {/* Network Multi-Station Mode Active Notice */}
+      {operatingMode === 'NETWORK_MULTI' && (
+        <div className="no-print print:hidden bg-gradient-to-r from-indigo-950/90 via-slate-900 to-indigo-950/90 border-b border-indigo-500/30 px-4 py-2 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-indigo-200">
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+            </span>
+            <span className="font-bold">روش ۲: شبکه محلی و چندکاربره فعال است</span>
+            <span className="text-slate-400 hidden md:inline">| لپ‌تاپ ۲ پذیرش و کیوسک لمسی آماده همگام‌سازی لحظه‌ای هستند</span>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <button
+              onClick={() => handleSelectStationRole('checkin')}
+              className="px-2.5 py-1 rounded-lg bg-indigo-600/40 hover:bg-indigo-600 text-indigo-100 border border-indigo-500/40 font-bold transition-colors"
+            >
+              لپ‌تاپ ۲: ثبت ورود
+            </button>
+            <button
+              onClick={() => handleSelectStationRole('kiosk')}
+              className="px-2.5 py-1 rounded-lg bg-emerald-600/40 hover:bg-emerald-600 text-emerald-100 border border-emerald-500/40 font-bold transition-colors"
+            >
+              کیوسک لمسی رأی
+            </button>
+            <button
+              onClick={() => setIsNetworkHubModalOpen(true)}
+              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-medium transition-colors"
+            >
+              کیوآرکد و تنظیمات
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Flash Banner if any */}
       {flashMessage && (
@@ -1411,6 +1653,15 @@ export default function App() {
           setIsGuideModalOpen(false);
           setIsSecurityModalOpen(true);
         }}
+      />
+
+      {/* Network & WiFi Station Selector Modal (روش سابق / روش شبکه و کیوسک) */}
+      <NetworkHubModal
+        isOpen={isNetworkHubModalOpen}
+        onClose={() => setIsNetworkHubModalOpen(false)}
+        currentMode={operatingMode}
+        onSelectMode={handleSelectMode}
+        onSelectStationRole={handleSelectStationRole}
       />
     </div>
   );

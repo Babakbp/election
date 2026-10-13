@@ -151,6 +151,33 @@ class AudioFeedbackService {
       // Silent fallback
     }
   }
+
+  playVoterCheckin() {
+    this.playScanSuccess();
+  }
+
+  playVoteCast() {
+    this.playVoteIncrement();
+  }
+
+  playCandidateSelect() {
+    try {
+      const ctx = this.getContext();
+      if (!ctx) return;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, ctx.currentTime);
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.06);
+    } catch {
+      // ignore
+    }
+  }
 }
 
 export const audioFeedback = new AudioFeedbackService();

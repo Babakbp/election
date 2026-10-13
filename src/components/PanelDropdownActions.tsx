@@ -10,7 +10,10 @@ import {
   ShieldCheck,
   Sparkles,
   Maximize,
-  Minimize
+  Minimize,
+  Wifi,
+  Laptop,
+  Network
 } from 'lucide-react';
 import { toPersianDigits } from '../utils/persian';
 
@@ -22,6 +25,8 @@ export interface PanelDropdownActionsProps {
   onExportExcel?: () => void;
   onOpenManualTallySheet?: () => void;
   onOpenSecurity?: () => void;
+  onOpenNetworkHub?: () => void;
+  operatingMode?: 'STANDALONE' | 'NETWORK_MULTI';
   archivedCount?: number;
   className?: string;
   isHeader?: boolean;
@@ -35,6 +40,8 @@ export const PanelDropdownActions: React.FC<PanelDropdownActionsProps> = ({
   onExportExcel,
   onOpenManualTallySheet,
   onOpenSecurity,
+  onOpenNetworkHub,
+  operatingMode = 'STANDALONE',
   archivedCount = 0,
   className = '',
   isHeader = false,
@@ -162,6 +169,35 @@ export const PanelDropdownActions: React.FC<PanelDropdownActionsProps> = ({
           </>
         )}
       </button>
+
+      {/* ====================================================================
+          کلید روش کاربری و شبکه وای‌فای (مستقل / شبکه و کیوسک)
+      ===================================================================== */}
+      {onOpenNetworkHub && (
+        <button
+          type="button"
+          onClick={onOpenNetworkHub}
+          title="تغییر روش کاربری: روش سابق (تک‌سیستمه آفلاین) یا روش شبکه و کیوسک لمسی"
+          className={`px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm border ${
+            operatingMode === 'NETWORK_MULTI'
+              ? 'bg-indigo-950/80 border-indigo-500/60 text-indigo-200 hover:bg-indigo-900 ring-2 ring-indigo-500/30'
+              : 'bg-slate-800/90 hover:bg-slate-700/90 text-slate-300 border border-slate-700/90 hover:text-white'
+          }`}
+        >
+          {operatingMode === 'NETWORK_MULTI' ? (
+            <>
+              <Wifi className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+              <span>شبکه و کیوسک</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            </>
+          ) : (
+            <>
+              <Laptop className="w-3.5 h-3.5 text-blue-400" />
+              <span>روش: تک‌سیستمه</span>
+            </>
+          )}
+        </button>
+      )}
 
       {/* ====================================================================
           2. کلید کشویی: پشتیبان و خروجی داده (Backup, Archive & Excel)
@@ -362,6 +398,33 @@ export const PanelDropdownActions: React.FC<PanelDropdownActionsProps> = ({
                   </div>
                   <div className="text-[10px] text-slate-400 truncate mt-0.5">
                     تغییر رمز عبور مدیر، قفل خودکار و فعال‌سازی
+                  </div>
+                </div>
+              </button>
+            )}
+
+            {/* Item 4: Network Hub & Station Switcher */}
+            {onOpenNetworkHub && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenDropdown(null);
+                  onOpenNetworkHub();
+                }}
+                className="w-full text-right p-2.5 rounded-xl hover:bg-slate-800/90 text-slate-200 hover:text-white flex items-center gap-3 transition group"
+              >
+                <div className="p-2 rounded-lg bg-indigo-950/60 border border-indigo-500/30 text-indigo-400 group-hover:bg-indigo-900/60 transition flex-shrink-0">
+                  <Network className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold text-slate-100 group-hover:text-indigo-300 transition flex items-center justify-between">
+                    <span>روش کاربری و شبکه وای‌فای</span>
+                    <span className="text-[10px] text-indigo-400 font-bold px-1.5 py-0.5 rounded bg-indigo-950 border border-indigo-500/30">
+                      {operatingMode === 'NETWORK_MULTI' ? 'شبکه فعال' : 'تک‌سیستمه'}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                    اتصال لپ‌تاپ ۲ پذیرش، کیوسک لمسی و پروژکتور
                   </div>
                 </div>
               </button>
