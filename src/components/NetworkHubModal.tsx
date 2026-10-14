@@ -25,7 +25,11 @@ import {
   Check, 
   RefreshCw,
   Info,
-  Layers
+  Layers,
+  Cable,
+  Monitor,
+  Terminal,
+  AlertTriangle
 } from 'lucide-react';
 
 interface NetworkHubModalProps {
@@ -56,7 +60,9 @@ export const NetworkHubModal: React.FC<NetworkHubModalProps> = ({
   });
 
   const [connectedStations, setConnectedStations] = useState<ConnectedStation[]>([]);
-  const [activeTabRole, setActiveTabRole] = useState<StationRole>('checkin');
+  const [activeTabRole, setActiveTabRole] = useState<StationRole>('kiosk');
+  const [connectionMedium, setConnectionMedium] = useState<'LAN_CABLE' | 'WIFI' | 'HDMI_DISPLAY'>('LAN_CABLE');
+  const [manualIp, setManualIp] = useState<string>('192.168.1.1');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
 
@@ -83,14 +89,23 @@ export const NetworkHubModal: React.FC<NetworkHubModalProps> = ({
       });
   }, [isOpen]);
 
+  const getStationUrl = (role: StationRole) => {
+    if (connectionMedium === 'LAN_CABLE') {
+      const port = networkInfo.port || 3000;
+      return `http://${manualIp.trim() || '192.168.1.1'}:${port}/?station=${role}`;
+    }
+    if (connectionMedium === 'HDMI_DISPLAY') {
+      return `http://localhost:3000/?station=${role}`;
+    }
+    const baseHost = window.location.host;
+    const protocol = window.location.protocol;
+    return `${protocol}//${baseHost}/?station=${role}`;
+  };
+
   // Generate QR Code for selected station link
   useEffect(() => {
     if (!isOpen) return;
-
-    const baseHost = window.location.host;
-    const protocol = window.location.protocol;
-    // Prefer network IP if available and user is accessing via network, otherwise window.location
-    const stationUrl = `${protocol}//${baseHost}/?station=${activeTabRole}`;
+    const stationUrl = getStationUrl(activeTabRole);
 
     QRCode.toDataURL(stationUrl, {
       width: 200,
@@ -102,15 +117,9 @@ export const NetworkHubModal: React.FC<NetworkHubModalProps> = ({
     })
       .then((url) => setQrDataUrl(url))
       .catch((err) => console.error('QR generate failed', err));
-  }, [isOpen, activeTabRole]);
+  }, [isOpen, activeTabRole, connectionMedium, manualIp, networkInfo.port]);
 
   if (!isOpen) return null;
-
-  const getStationUrl = (role: StationRole) => {
-    const baseHost = window.location.host;
-    const protocol = window.location.protocol;
-    return `${protocol}//${baseHost}/?station=${role}`;
-  };
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -197,66 +206,139 @@ export const NetworkHubModal: React.FC<NetworkHubModalProps> = ({
           </div>
         </div>
 
-        {/* Section for Network Mode Configuration */}
+        {/* Section for Network & Cable Mode Configuration */}
         {currentMode === 'NETWORK_MULTI' && (
           <div className="bg-slate-950/80 border border-slate-800 rounded-3xl p-5 md:p-6 space-y-6">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-              <div className="flex items-center gap-2 text-indigo-300 font-bold text-sm">
-                <Radio className="w-4 h-4 text-emerald-400 animate-pulse" />
-                <span>لینک‌ها و بارکدهای اتصال ترمینال‌های فرعی</span>
+            
+            {/* Connection Medium Selector: LAN Cable vs HDMI vs WiFi */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                  <Cable className="w-4 h-4 text-emerald-400" />
+                  نوع بستر ارتباطی بین لپ‌تاپ اصلی و لپ‌تاپ/نمایشگر لمسی:
+                </span>
+                <span className="text-[11px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                  {connectionMedium === 'LAN_CABLE' && 'توصیه اکید برای روز انتخابات (کابل شبکه)'}
+                  {connectionMedium === 'HDMI_DISPLAY' && 'بدون شبکه (مانیتور دوم یا کابل تصویر)'}
+                  {connectionMedium === 'WIFI' && 'بی‌سیم (وای‌فای / هات‌اسپات)'}
+                </span>
               </div>
-              <span className="text-xs text-slate-400">
-                دستگاه‌های متصل فعال: {toPersianDigits(connectedStations.length)} دستگاه
-              </span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConnectionMedium('LAN_CABLE');
+                    if (!manualIp) setManualIp('192.168.1.1');
+                  }}
+                  className={`p-3 rounded-2xl border text-right transition-all flex flex-col gap-1 ${
+                    connectionMedium === 'LAN_CABLE'
+                      ? 'bg-emerald-950/40 border-emerald-500 ring-2 ring-emerald-500/20 text-white'
+                      : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 font-black text-xs md:text-sm text-emerald-400">
+                    <Cable className="w-4 h-4" />
+                    <span>۱. کابل شبکه (LAN)</span>
+                  </div>
+                  <span className="text-[11px] text-slate-400 leading-tight">
+                    اتصال مستقیم با کابل شبکه RJ45 (صفر درصد قطعی، بدون نیاز به مودم یا اینترنت)
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setConnectionMedium('HDMI_DISPLAY')}
+                  className={`p-3 rounded-2xl border text-right transition-all flex flex-col gap-1 ${
+                    connectionMedium === 'HDMI_DISPLAY'
+                      ? 'bg-blue-950/40 border-blue-500 ring-2 ring-blue-500/20 text-white'
+                      : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 font-black text-xs md:text-sm text-blue-400">
+                    <Monitor className="w-4 h-4" />
+                    <span>۲. کابل تصویر (HDMI)</span>
+                  </div>
+                  <span className="text-[11px] text-slate-400 leading-tight">
+                    استفاده از مانیتور لمسی به عنوان صفحه دوم (Extend Display) در یک کامپیوتر
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setConnectionMedium('WIFI')}
+                  className={`p-3 rounded-2xl border text-right transition-all flex flex-col gap-1 ${
+                    connectionMedium === 'WIFI'
+                      ? 'bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/20 text-white'
+                      : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 font-black text-xs md:text-sm text-indigo-400">
+                    <Wifi className="w-4 h-4" />
+                    <span>۳. وای‌فای (Wi-Fi)</span>
+                  </div>
+                  <span className="text-[11px] text-slate-400 leading-tight">
+                    اتصال بی‌سیم از طریق مودم سالن یا هات‌اسپات موبایل
+                  </span>
+                </button>
+              </div>
             </div>
 
             {/* Station Selector Tabs */}
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                onClick={() => setActiveTabRole('checkin')}
-                className={`py-3 px-3 rounded-2xl text-xs md:text-sm font-bold flex flex-col sm:flex-row items-center justify-center gap-2 border transition-all ${
-                  activeTabRole === 'checkin'
-                    ? 'bg-indigo-600/30 border-indigo-500 text-white ring-2 ring-indigo-500/20'
-                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Users className="w-4 h-4 text-indigo-400" />
-                <span>باجه ثبت ورود (لپ‌تاپ ۲)</span>
-              </button>
+            <div className="border-t border-slate-800/80 pt-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-slate-400 font-bold">انتخاب ایستگاه مورد نظر:</span>
+                <span className="text-xs text-slate-400">
+                  دستگاه‌های فعال آنلاین: {toPersianDigits(connectedStations.length)}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => setActiveTabRole('kiosk')}
+                  className={`py-2.5 px-3 rounded-2xl text-xs md:text-sm font-bold flex items-center justify-center gap-2 border transition-all ${
+                    activeTabRole === 'kiosk'
+                      ? 'bg-emerald-600/30 border-emerald-500 text-white ring-2 ring-emerald-500/20'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Vote className="w-4 h-4 text-emerald-400" />
+                  <span>کیوسک لمسی اخذ رأی</span>
+                </button>
 
-              <button
-                onClick={() => setActiveTabRole('kiosk')}
-                className={`py-3 px-3 rounded-2xl text-xs md:text-sm font-bold flex flex-col sm:flex-row items-center justify-center gap-2 border transition-all ${
-                  activeTabRole === 'kiosk'
-                    ? 'bg-emerald-600/30 border-emerald-500 text-white ring-2 ring-emerald-500/20'
-                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Vote className="w-4 h-4 text-emerald-400" />
-                <span>کیوسک لمسی اخذ رأی</span>
-              </button>
+                <button
+                  onClick={() => setActiveTabRole('checkin')}
+                  className={`py-2.5 px-3 rounded-2xl text-xs md:text-sm font-bold flex items-center justify-center gap-2 border transition-all ${
+                    activeTabRole === 'checkin'
+                      ? 'bg-indigo-600/30 border-indigo-500 text-white ring-2 ring-indigo-500/20'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Users className="w-4 h-4 text-indigo-400" />
+                  <span>باجه ثبت ورود (لپ‌تاپ ۲)</span>
+                </button>
 
-              <button
-                onClick={() => setActiveTabRole('projector')}
-                className={`py-3 px-3 rounded-2xl text-xs md:text-sm font-bold flex flex-col sm:flex-row items-center justify-center gap-2 border transition-all ${
-                  activeTabRole === 'projector'
-                    ? 'bg-blue-600/30 border-blue-500 text-white ring-2 ring-blue-500/20'
-                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Tv className="w-4 h-4 text-blue-400" />
-                <span>پروژکتور سالن</span>
-              </button>
+                <button
+                  onClick={() => setActiveTabRole('projector')}
+                  className={`py-2.5 px-3 rounded-2xl text-xs md:text-sm font-bold flex items-center justify-center gap-2 border transition-all ${
+                    activeTabRole === 'projector'
+                      ? 'bg-blue-600/30 border-blue-500 text-white ring-2 ring-blue-500/20'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Tv className="w-4 h-4 text-blue-400" />
+                  <span>پروژکتور سالن</span>
+                </button>
+              </div>
             </div>
 
-            {/* Station Details & QR Code */}
+            {/* Station Details & Link Box */}
             <div className="flex flex-col md:flex-row items-center gap-6 bg-slate-900 p-5 rounded-2xl border border-slate-800">
-              {/* QR Code */}
+              {/* QR Code (Useful for phone / tablet camera) */}
               <div className="bg-white p-2.5 rounded-2xl shadow-md flex-shrink-0">
                 {qrDataUrl ? (
-                  <img src={qrDataUrl} alt="QR Code" className="w-36 h-36" />
+                  <img src={qrDataUrl} alt="QR Code" className="w-32 h-32 md:w-36 md:h-36" />
                 ) : (
-                  <div className="w-36 h-36 bg-slate-200 animate-pulse rounded-xl" />
+                  <div className="w-32 h-32 bg-slate-200 animate-pulse rounded-xl" />
                 )}
               </div>
 
@@ -264,19 +346,54 @@ export const NetworkHubModal: React.FC<NetworkHubModalProps> = ({
               <div className="flex-1 w-full space-y-3">
                 <div className="flex items-center justify-between">
                   <h4 className="font-bold text-slate-100 text-base flex items-center gap-2">
-                    {activeTabRole === 'checkin' && 'لپ‌تاپ ۲: باجه ثبت ورود و پذیرش واجدین شرایط'}
-                    {activeTabRole === 'kiosk' && 'مانیتور لمسی: کیوسک اخذ رأی دیجیتال'}
+                    {activeTabRole === 'kiosk' && 'کیوسک لمسی اخذ رأی (لپ‌تاپ یا مانیتور لمسی)'}
+                    {activeTabRole === 'checkin' && 'باجه ثبت ورود و پذیرش واجدین شرایط'}
                     {activeTabRole === 'projector' && 'نمایشگر زنده پروژکتور سالن'}
                   </h4>
                 </div>
 
+                {/* If LAN Cable: Allow setting Server IP */}
+                {connectionMedium === 'LAN_CABLE' && (
+                  <div className="flex items-center gap-2 bg-slate-950/80 p-2 rounded-xl border border-slate-800">
+                    <span className="text-[11px] text-slate-400 whitespace-nowrap font-medium">
+                      IP لپ‌تاپ اصلی (سرور):
+                    </span>
+                    <input
+                      type="text"
+                      value={manualIp}
+                      onChange={(e) => setManualIp(e.target.value)}
+                      placeholder="192.168.1.1"
+                      className="bg-slate-900 border border-slate-700 text-emerald-400 font-mono text-xs px-2.5 py-1 rounded-lg w-36 text-center focus:outline-none focus:border-emerald-500"
+                      dir="ltr"
+                    />
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setManualIp('192.168.1.1')}
+                        className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded border border-slate-700"
+                      >
+                        192.168.1.1
+                      </button>
+                      {networkInfo.primaryIp && networkInfo.primaryIp !== '192.168.1.1' && (
+                        <button
+                          type="button"
+                          onClick={() => setManualIp(networkInfo.primaryIp)}
+                          className="text-[10px] bg-slate-800 hover:bg-slate-700 text-indigo-300 px-2 py-1 rounded border border-slate-700"
+                        >
+                          IP خودکار: {networkInfo.primaryIp}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  {activeTabRole === 'checkin' &&
-                    'این آدرس را روی لپ‌تاپ یا تبلت دوم باز کنید تا متصدی بتواند مراجعین را جستجو و بارکد کارت ملی را اسکن کرده و ورود آنها را در لحظه ثبت کند.'}
-                  {activeTabRole === 'kiosk' &&
-                    'این آدرس را روی لپ‌تاپ متصل به مانیتور لمسی باز کنید تا رأی‌دهندگان با زدن دکمه کاندیدا رأی دهند و فوراً به صندوق اضافه شود.'}
-                  {activeTabRole === 'projector' &&
-                    'این آدرس را روی دستگاه متصل به پروژکتور یا تلویزیون سالن باز کنید تا نمودار نتایج را به صورت زنده نمایش دهد.'}
+                  {connectionMedium === 'LAN_CABLE' &&
+                    'این آدرس را در مرورگر کروم یا اج لپ‌تاپ لمسی وارد کنید و سپس کلید F11 را بزنید تا تمام صفحه شود.'}
+                  {connectionMedium === 'HDMI_DISPLAY' &&
+                    'کلیدهای Windows + P را زده و Extend را انتخاب کنید؛ سپس این آدرس را در پنجره جدید باز کرده، به مانیتور لمسی بکشید و F11 را بزنید.'}
+                  {connectionMedium === 'WIFI' &&
+                    'مطمئن شوید هر دو لپ‌تاپ به یک وای‌فای متصل هستند؛ سپس آدرس زیر را در دستگاه دوم باز کنید.'}
                 </p>
 
                 {/* Direct Link Input */}
@@ -285,7 +402,7 @@ export const NetworkHubModal: React.FC<NetworkHubModalProps> = ({
                     type="text"
                     readOnly
                     value={getStationUrl(activeTabRole)}
-                    className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-indigo-300 dir-ltr select-all focus:outline-none"
+                    className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-emerald-400 dir-ltr select-all focus:outline-none"
                   />
                   <button
                     onClick={() => copyToClipboard(getStationUrl(activeTabRole))}
@@ -299,35 +416,168 @@ export const NetworkHubModal: React.FC<NetworkHubModalProps> = ({
                     ) : (
                       <>
                         <Copy className="w-4 h-4" />
-                        <span>کپی لینک</span>
+                        <span>کپی آدرس</span>
                       </>
                     )}
                   </button>
 
                   <button
                     onClick={() => {
-                      onSelectStationRole(activeTabRole);
-                      onClose();
+                      if (connectionMedium === 'HDMI_DISPLAY') {
+                        window.open(getStationUrl(activeTabRole), '_blank');
+                      } else {
+                        onSelectStationRole(activeTabRole);
+                        onClose();
+                      }
                     }}
-                    className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black flex items-center gap-1.5 transition-colors shadow-md shadow-indigo-900/30"
+                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 transition-colors shadow-md shadow-emerald-900/30 whitespace-nowrap"
                   >
-                    <span>اجرا در همین سیستم</span>
+                    <span>{connectionMedium === 'HDMI_DISPLAY' ? 'باز کردن در پنجره جدید' : 'اجرا در این سیستم'}</span>
                     <ExternalLink className="w-4 h-4" />
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* WiFi Setup Guide Banner */}
-            <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-850 flex items-start gap-3 text-xs text-slate-400 leading-relaxed">
-              <Info className="w-5 h-5 text-indigo-400 flex-shrink-0 mt-0.5" />
-              <div>
-                <strong className="text-slate-200 block mb-0.5">
-                  راهنمای اتصال آسان دو لپ‌تاپ در سالن انتخابات:
-                </strong>
-                کافیست هر دو دستگاه به یک مودم وای‌فای یا نقطه اتصال (Hotspot) تلفن همراه متصل باشند. سپس لینک فوق را در مرورگر دستگاه دوم وارد کنید یا با گوشی اسکن کنید. تمام داده‌ها با کمترین تاخیر در حافظه سرور و وب‌سوکت تبادل خواهند شد.
+            {/* STEP-BY-STEP INSTRUCTIONS ACCORDING TO SELECTED MEDIUM */}
+            {connectionMedium === 'LAN_CABLE' && (
+              <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-2xl p-4 md:p-5 space-y-4">
+                <div className="flex items-center gap-2 text-emerald-300 font-bold text-sm">
+                  <Cable className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                  <span>راهنمای گام‌به‌گام اتصال مستقیم دو لپ‌تاپ با کابل شبکه (LAN / Ethernet):</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                  {/* Step 1 */}
+                  <div className="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+                    <span className="inline-block bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded text-[11px]">
+                      گام ۱: اتصال فیزیکی کابل
+                    </span>
+                    <p className="text-slate-300 leading-relaxed">
+                      یک سر کابل شبکه (پچ‌کورد معمولی RJ45) را به پورت شبکه لپ‌تاپ اصلی و سر دیگر را به لپ‌تاپ لمسی وصل کنید. (نیازی به مودم نیست، کارت شبکه‌ها مستقیم وصل می‌شوند).
+                    </p>
+                  </div>
+
+                  {/* Step 2 */}
+                  <div className="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="inline-block bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded text-[11px]">
+                        گام ۲: تنظیم IP در ویندوز
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard('ncpa.cpl')}
+                        className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded flex items-center gap-1 font-mono"
+                        title="کپی دستور Run ویندوز"
+                      >
+                        <Copy className="w-3 h-3" />
+                        <span>ncpa.cpl</span>
+                      </button>
+                    </div>
+                    <p className="text-slate-300 leading-relaxed text-[11px]">
+                      کلیدهای <kbd className="bg-slate-800 px-1 py-0.5 rounded text-amber-300 font-mono">Win + R</kbd> را بزنید، <code className="text-emerald-400 font-mono">ncpa.cpl</code> را تایپ و Enter کنید:
+                      <br />
+                      • <strong>لپ‌تاپ اصلی:</strong> آی‌پی <code className="text-emerald-300 font-mono">192.168.1.1</code> و ساب‌نت <code className="font-mono">255.255.255.0</code>
+                      <br />
+                      • <strong>لپ‌تاپ لمسی:</strong> آی‌پی <code className="text-emerald-300 font-mono">192.168.1.2</code> و گیت‌وی <code className="font-mono">192.168.1.1</code>
+                    </p>
+                  </div>
+
+                  {/* Step 3 */}
+                  <div className="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+                    <span className="inline-block bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded text-[11px]">
+                      گام ۳: اجرا در لپ‌تاپ لمسی
+                    </span>
+                    <p className="text-slate-300 leading-relaxed">
+                      در مرورگر لپ‌تاپ لمسی، آدرس زیر را وارد کنید و سپس کلید <kbd className="bg-slate-800 px-1 py-0.5 rounded text-amber-300 font-mono">F11</kbd> را برای تمام‌صفحه شدن بزنید:
+                    </p>
+                    <code className="block bg-slate-950 p-1.5 rounded text-[11px] font-mono text-emerald-400 text-center dir-ltr select-all">
+                      http://192.168.1.1:3000/?station=kiosk
+                    </code>
+                  </div>
+                </div>
+
+                {/* Golden Firewall Tip */}
+                <div className="bg-amber-950/30 border border-amber-500/30 p-3 rounded-xl flex items-start gap-2.5 text-xs text-amber-200">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 space-y-1">
+                    <strong>نکته حیاتی فایروال ویندوز (اگر صفحه باز نشد):</strong>
+                    <p className="text-[11px] text-amber-300/90 leading-relaxed">
+                      اگر لپ‌تاپ لمسی خطای عدم اتصال داد، فایروال لپ‌تاپ اصلی پورت ۳۰۰۰ را بسته است. در لپ‌تاپ اصلی، PowerShell را با <span className="font-bold underline">Run as administrator</span> باز کرده و دستور زیر را اجرا کنید:
+                    </p>
+                    <div className="flex items-center gap-2 bg-slate-950/80 p-2 rounded-lg border border-slate-800 font-mono text-[11px] text-slate-300">
+                      <span className="flex-1 dir-ltr truncate">
+                        netsh advfirewall firewall add rule name="ElectionSystem" dir=in action=allow protocol=TCP localport=3000
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard('netsh advfirewall firewall add rule name="ElectionSystem" dir=in action=allow protocol=TCP localport=3000')}
+                        className="px-2 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded font-bold flex items-center gap-1 text-[10px]"
+                      >
+                        <Copy className="w-3 h-3" />
+                        <span>کپی دستور</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
+
+            {connectionMedium === 'HDMI_DISPLAY' && (
+              <div className="bg-blue-950/20 border border-blue-500/30 rounded-2xl p-4 md:p-5 space-y-4">
+                <div className="flex items-center gap-2 text-blue-300 font-bold text-sm">
+                  <Monitor className="w-5 h-5 text-blue-400 flex-shrink-0" />
+                  <span>راهنمای اتصال از طریق کابل تصویر (HDMI / مانیتور لمسی دوم):</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                  <div className="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+                    <span className="inline-block bg-blue-500/20 text-blue-400 font-bold px-2 py-0.5 rounded text-[11px]">
+                      گام ۱: اتصال کابل تصویر و لمس
+                    </span>
+                    <p className="text-slate-300 leading-relaxed">
+                      کابل تصویر HDMI (و کابل USB تاچ در صورتی که مانیتور لمسی مجزا دارید) را به لپ‌تاپ اصلی متصل کنید.
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+                    <span className="inline-block bg-blue-500/20 text-blue-400 font-bold px-2 py-0.5 rounded text-[11px]">
+                      گام ۲: توسعه تصویر در ویندوز
+                    </span>
+                    <p className="text-slate-300 leading-relaxed">
+                      کلیدهای <kbd className="bg-slate-800 px-1 py-0.5 rounded text-amber-300 font-mono">Windows + P</kbd> را در ویندوز زده و گزینه <strong className="text-blue-300">Extend (توسعه)</strong> را انتخاب کنید تا مانیتور دوم فعال شود.
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-900/90 p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+                    <span className="inline-block bg-blue-500/20 text-blue-400 font-bold px-2 py-0.5 rounded text-[11px]">
+                      گام ۳: انتقال کیوسک به صفحه لمسی
+                    </span>
+                    <p className="text-slate-300 leading-relaxed">
+                      دکمه «باز کردن در پنجره جدید» بالا را بزنید، پنجره باز شده را با ماوس بکشید و داخل مانیتور لمسی ببرید و کلید <kbd className="bg-slate-800 px-1 py-0.5 rounded text-amber-300 font-mono">F11</kbd> را بزنید.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/70 border border-slate-800 p-3 rounded-xl text-xs text-slate-300 flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                  <span><strong>مزیت بزرگ این روش:</strong> چون همه چیز روی یک کامپیوتر اجرا می‌شود، هیچ نیازی به شبکه یا وای‌فای ندارد و قطعی آن غیرممکن است.</span>
+                </div>
+              </div>
+            )}
+
+            {connectionMedium === 'WIFI' && (
+              <div className="bg-indigo-950/20 border border-indigo-500/30 rounded-2xl p-4 md:p-5 space-y-3">
+                <div className="flex items-center gap-2 text-indigo-300 font-bold text-sm">
+                  <Wifi className="w-5 h-5 text-indigo-400 flex-shrink-0" />
+                  <span>راهنمای اتصال از طریق شبکه وای‌فای (مودم سالن یا هات‌اسپات گوشی):</span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  هر دو لپ‌تاپ را به یک مودم یا هات‌اسپات متصل کنید. در لپ‌تاپ اصلی در برنامه CMD دستور <code className="text-amber-300 font-mono">ipconfig</code> را بزنید تا IPv4 را ببینید (مثلاً 192.168.1.5)، سپس در مرورگر لپ‌تاپ لمسی آدرس <code className="text-emerald-400 font-mono">http://[آی‌پی]:3000/?station=kiosk</code> را وارد کنید.
+                </p>
+              </div>
+            )}
+
           </div>
         )}
 
