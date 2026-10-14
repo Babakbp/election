@@ -174,15 +174,21 @@ class SyncEngine {
    * Dispatches via WebSocket, BroadcastChannel AND HTTP REST endpoint
    * to guarantee the vote is never missed by the master station.
    */
-  public async castVote(candidateIds: string[], voterId?: string, stationName?: string): Promise<boolean> {
+  public async castVote(
+    candidateIds: string[], 
+    voterId?: string, 
+    stationName?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const voteId = 'vote_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
     const payload = {
+      voteId,
       candidateIds,
       voterId,
       stationName: stationName || this.getStationDisplayName(this.role),
       timestamp: new Date().toISOString(),
     };
 
-    // 1. Broadcast locally and via WebSocket
+    // 1. Broadcast locally (for same-machine multi-screen) and via WebSocket
     this.broadcast('KIOSK_MULTIPLE_VOTES_CAST', payload);
 
     // 2. Send via HTTP REST API endpoint for guaranteed server-side delivery
@@ -191,19 +197,31 @@ class SyncEngine {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          voteId,
           candidateIds,
           voterId,
           source: this.role === 'kiosk' ? 'kiosk' : 'mobile',
           stationName: stationName || this.getStationDisplayName(this.role),
         }),
       });
+
       if (res.ok) {
-        return true;
+        return { success: true };
+      } else {
+        const errText = await res.text();
+        return { success: false, error: `پاسخ ناموفق سرور (${res.status}): ${errText}` };
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn('[SyncEngine] HTTP Vote fetch error', err);
+      // If WebSocket is open, vote was at least sent through WS
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        return { success: true };
+      }
+      return { 
+        success: false, 
+        error: err?.message || 'عدم دسترسی به سرور انتخابات. اتصال وای‌فای/شبکه دستگاه را بررسی فرمایید.' 
+      };
     }
-    return true;
   }
 
   /**

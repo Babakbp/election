@@ -77,6 +77,7 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
   const [pinError, setPinError] = useState('');
   const [limitWarning, setLimitWarning] = useState<string | null>(null);
   const [isSubmittingVote, setIsSubmittingVote] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Filter approved candidates
   const approvedCandidates = useMemo(() => {
@@ -238,7 +239,20 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
     const chosenNames = chosenCands.map(c => c.name);
 
     try {
-      // 1. Call parent state handlers
+      // 1. Deliver via SyncEngine (BroadcastChannel + WebSocket + HTTP REST /api/sync/vote)
+      const stationTitle = voterIdParam ? 'گوشی همراه رأی‌دهنده (اسکن بارکد)' : 'کیوسک لمسی دیجیتال (صندوق ۱)';
+      const castResult = await syncEngine.castVote(selectedCandidateIds, voterIdParam || undefined, stationTitle);
+
+      if (!castResult.success) {
+        setIsSubmittingVote(false);
+        setSubmitError(castResult.error || 'خطا در ثبت رأی در سرور. ارتباط گوشی با سرور برقرار نشد.');
+        audioFeedback.playWarning();
+        return;
+      }
+
+      setSubmitError(null);
+
+      // 2. Call parent state handlers
       if (onMultipleVotesCast) {
         await onMultipleVotesCast(selectedCandidateIds);
       } else {
@@ -246,10 +260,6 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
           await onVoteCast(id);
         }
       }
-
-      // 2. Deliver via SyncEngine (BroadcastChannel + WebSocket + HTTP REST /api/sync/vote)
-      const stationTitle = voterIdParam ? 'گوشی همراه رأی‌دهنده (اسکن بارکد)' : 'کیوسک لمسی دیجیتال (صندوق ۱)';
-      await syncEngine.castVote(selectedCandidateIds, voterIdParam || undefined, stationTitle);
 
       // 3. Mark voted candidates locally to remove them from screen if hideVotedCandidates is active
       setVotedCandidateIdsLocally(prev => {
@@ -267,12 +277,15 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
         }
         setHasAlreadyVoted(true);
       }
-    } catch (err) {
-      console.error('Vote submission error:', err);
-    } finally {
-      setIsSubmittingVote(false);
+
       setLastVotedCandidateNames(chosenNames);
       setIsSuccessView(true);
+    } catch (err: any) {
+      console.error('Vote submission error:', err);
+      setSubmitError(err?.message || 'خطای غیرمنتظره در ثبت رأی');
+      audioFeedback.playWarning();
+    } finally {
+      setIsSubmittingVote(false);
     }
   };
 
@@ -707,6 +720,43 @@ export const TouchVotingKiosk: React.FC<TouchVotingKioskProps> = ({
                 className="py-4 px-6 rounded-2xl bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-sm sm:text-base border border-slate-700 active:scale-95 transition-all"
               >
                 بازگشت و تغییر انتخاب
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Network / Server Submission Error Modal */}
+      {submitError && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
+          <div className="bg-slate-900 border-2 border-red-500/60 rounded-3xl max-w-md w-full p-6 text-center shadow-2xl space-y-4">
+            <div className="w-16 h-16 mx-auto rounded-2xl bg-red-500/20 border-2 border-red-500 text-red-400 flex items-center justify-center shadow-lg shadow-red-500/20">
+              <AlertTriangle className="w-9 h-9" />
+            </div>
+            <h3 className="text-xl font-black text-white">عدم ثبت رأی در سرور انتخابات</h3>
+            <div className="text-xs text-red-200 bg-red-950/40 p-3 rounded-xl border border-red-500/30 leading-relaxed text-right">
+              {submitError}
+            </div>
+            <div className="text-right text-xs text-slate-400 space-y-1 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+              <p className="font-bold text-slate-300">💡 راهنمای اتصال گوشی به سرور:</p>
+              <p>• گوشی همراه شما باید دقیقاً به همان شبکه Wi-Fi لپ‌تاپ سرور متصل باشد.</p>
+              <p>• در صورت روشن بودن، داده سیم‌کارت (اینترنت موبایل) را موقتاً قطع و فقط وای‌فای را متصل نگه دارید.</p>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={handleConfirmVote}
+                className="flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow active:scale-95 transition"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>تلاش مجدد برای ثبت رأی</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubmitError(null)}
+                className="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs active:scale-95 transition"
+              >
+                انصراف
               </button>
             </div>
           </div>

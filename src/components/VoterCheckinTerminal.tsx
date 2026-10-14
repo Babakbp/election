@@ -81,14 +81,20 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
   const [customHost, setCustomHost] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
   const [networkIp, setNetworkIp] = useState<string>('');
+  const [publicSharedHost, setPublicSharedHost] = useState<string>('');
 
   // Fetch local network IP for mobile device compatibility
   useEffect(() => {
     fetch('/api/network/info')
       .then((res) => res.json())
       .then((data) => {
-        if (data && data.primaryIp && data.primaryIp !== 'localhost') {
-          setNetworkIp(data.primaryIp);
+        if (data) {
+          if (data.primaryIp && !data.primaryIp.startsWith('169.254') && data.primaryIp !== 'localhost') {
+            setNetworkIp(data.primaryIp);
+          }
+          if (data.publicSharedHost) {
+            setPublicSharedHost(data.publicSharedHost);
+          }
         }
       })
       .catch(() => {});
@@ -125,7 +131,10 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
     let hostToUse = window.location.host;
     if (customHost.trim()) {
       hostToUse = customHost.trim();
-    } else if (networkIp && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    } else if (publicSharedHost && window.location.host.includes('ais-dev-')) {
+      // Use public shared host in AI Studio so mobile phones can open without Google login
+      hostToUse = publicSharedHost;
+    } else if (networkIp && !networkIp.startsWith('169.254') && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
       const port = window.location.port || '3000';
       hostToUse = `${networkIp}:${port}`;
     }
@@ -138,7 +147,7 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
       url.searchParams.set('voter', currentVoterForQr.id);
     }
     return url.toString();
-  }, [customHost, currentVoterForQr, networkIp]);
+  }, [customHost, currentVoterForQr, networkIp, publicSharedHost]);
 
   // Generate QR code when modal opens or url changes
   useEffect(() => {
@@ -817,6 +826,19 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Localhost Guidance Warning */}
+            {typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && !networkIp && !customHost && (
+              <div className="mb-3 p-2.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-200 text-xs text-right space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-amber-300">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                  <span>راهنمای اسکن در شبکه محلی (Localhost):</span>
+                </div>
+                <p className="leading-relaxed text-[11px]">
+                  سیستم در حال حاضر روی <code>localhost</code> است. برای اینکه دوربین گوشی بتواند صفحه را باز کند، گوشی و کامپیوتر باید به یک Wi-Fi مشترک وصل باشند. در بخش زیر، آی‌پی وای‌فای لپ‌تاپ (مثلاً <code>192.168.1.10:3000</code>) را درج نمایید تا بارکد به‌روزرسانی شود.
+                </p>
+              </div>
+            )}
 
             {/* Host / IP Configuration Details */}
             <div className="mb-3 text-right">

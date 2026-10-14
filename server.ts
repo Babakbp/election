@@ -14,17 +14,37 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 
 app.use(express.json({ limit: '15mb' }));
 
-// Helper to get local network IP addresses
-function getLocalIpAddresses() {
+// Enable CORS for mobile devices across LAN / proxies
+app.use((_req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (_req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
+// Helper to get local network IP addresses (prioritizing 192.168.x.x and 10.x.x.x, excluding 169.254.x.x link-local)
+function getLocalIpAddresses(): string[] {
   const interfaces = os.networkInterfaces();
   const addresses: string[] = [];
   for (const k in interfaces) {
     for (const addr of interfaces[k] || []) {
       if (addr.family === 'IPv4' && !addr.internal) {
-        addresses.push(addr.address);
+        // Exclude link-local APIPA addresses (169.254.x.x) and loopback
+        if (!addr.address.startsWith('169.254.') && !addr.address.startsWith('127.')) {
+          addresses.push(addr.address);
+        }
       }
     }
   }
+  // Sort so typical LAN router IPs (192.168.x.x, 10.x.x.x) come first
+  addresses.sort((a, b) => {
+    const scoreA = a.startsWith('192.168.') ? 3 : a.startsWith('10.') ? 2 : a.startsWith('172.') ? 1 : 0;
+    const scoreB = b.startsWith('192.168.') ? 3 : b.startsWith('10.') ? 2 : b.startsWith('172.') ? 1 : 0;
+    return scoreB - scoreA;
+  });
   return addresses;
 }
 
@@ -103,13 +123,17 @@ wss.on('connection', (ws: WebSocket, req) => {
 // Network information endpoint
 app.get('/api/network/info', (req, res) => {
   const ips = getLocalIpAddresses();
-  const host = req.get('host') || 'localhost:3000';
-  const protocol = req.protocol;
+  const rawHost = req.get('host') || 'localhost:3000';
+  const isAiStudioDev = rawHost.includes('ais-dev-');
+  const publicSharedHost = isAiStudioDev ? rawHost.replace('ais-dev-', 'ais-pre-') : rawHost;
+
   res.json({
     localIps: ips,
-    primaryIp: ips[0] || 'localhost',
+    primaryIp: ips[0] || null,
     port: 3000,
-    currentHost: host,
+    currentHost: rawHost,
+    publicSharedHost,
+    isAiStudioDev,
     connectedClientsCount: clients.size,
     isServerActive: true,
   });
@@ -127,13 +151,21 @@ const recentVotesQueue: Array<{
 
 // Voting API endpoint for reliable mobile phone & kiosk vote submission
 app.post('/api/sync/vote', (req, res) => {
-  const { candidateIds, voterId, source = 'mobile', stationName = 'گوشی همراه رأی‌دهنده' } = req.body;
+  const { voteId, candidateIds, voterId, source = 'mobile', stationName = 'گوشی همراه رأی‌دهنده' } = req.body;
   if (!Array.isArray(candidateIds) || candidateIds.length === 0) {
     return res.status(400).json({ error: 'candidateIds array is required' });
   }
 
+  const effectiveVoteId = voteId || ('vote_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7));
+
+  // Check if this vote was already processed in recentVotesQueue (Idempotency)
+  const existing = recentVotesQueue.find(v => v.id === effectiveVoteId);
+  if (existing) {
+    return res.json({ success: true, voteId: effectiveVoteId, alreadyProcessed: true });
+  }
+
   const voteEvent = {
-    id: 'vote_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+    id: effectiveVoteId,
     candidateIds,
     voterId,
     source,
@@ -142,8 +174,8 @@ app.post('/api/sync/vote', (req, res) => {
   };
 
   recentVotesQueue.push(voteEvent);
-  // Keep last 100 votes in memory
-  if (recentVotesQueue.length > 100) {
+  // Keep last 200 votes in memory
+  if (recentVotesQueue.length > 200) {
     recentVotesQueue.shift();
   }
 
