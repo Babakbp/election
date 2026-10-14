@@ -34,8 +34,11 @@ import {
   ExternalLink,
   Copy,
   Check,
-  X
+  X,
+  Trash2,
+  FileCheck
 } from 'lucide-react';
+import { VoterStatus } from '../types/election';
 
 interface VoterCheckinTerminalProps {
   session: ElectionSession;
@@ -43,6 +46,9 @@ interface VoterCheckinTerminalProps {
   currentOperator: Operator;
   isLocked: boolean;
   onToggleVoterStatus: (voterId: string) => Promise<void> | void;
+  onSetVoterStatus?: (voterId: string, status: VoterStatus) => Promise<void> | void;
+  onDeleteVoter?: (voterId: string) => Promise<void> | void;
+  onClearAllVoters?: () => Promise<void> | void;
   onAddVoter: (voter: Omit<Voter, 'id' | 'rowNumber' | 'hasVoted'>) => Promise<void> | void;
   onExitTerminal: () => void;
 }
@@ -53,11 +59,15 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
   currentOperator,
   isLocked,
   onToggleVoterStatus,
+  onSetVoterStatus,
+  onDeleteVoter,
+  onClearAllVoters,
   onAddVoter,
   onExitTerminal,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterState, setFilterState] = useState<'ALL' | 'VOTED' | 'NOT_VOTED'>('ALL');
+  const [filterState, setFilterState] = useState<'ALL' | 'BALLOT_DELIVERED' | 'VOTED' | 'NOT_VOTED'>('ALL');
+  const [voterToDelete, setVoterToDelete] = useState<Voter | null>(null);
   const [barcodeInput, setBarcodeInput] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [scanResult, setScanResult] = useState<{
@@ -103,10 +113,11 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
   const barcodeInputRef = useRef<HTMLInputElement>(null);
 
   // Derived statistics
-  const votedCount = useMemo(() => voters.filter(v => v.hasVoted).length, [voters]);
+  const ballotDeliveredCount = useMemo(() => voters.filter(v => v.status === 'BALLOT_DELIVERED' || (!v.hasVoted && !!v.ballotDeliveredAt)).length, [voters]);
+  const votedCount = useMemo(() => voters.filter(v => v.status === 'VOTED' || v.hasVoted).length, [voters]);
   const totalCount = voters.length;
-  const remainingCount = totalCount - votedCount;
-  const attendancePercentage = totalCount > 0 ? Math.round((votedCount / totalCount) * 100) : 0;
+  const remainingCount = useMemo(() => voters.filter(v => (v.status === 'NOT_CHECKED_IN' || (!v.status && !v.hasVoted && !v.ballotDeliveredAt))).length, [voters]);
+  const attendancePercentage = totalCount > 0 ? Math.round(((votedCount + ballotDeliveredCount) / totalCount) * 100) : 0;
   const maxAllowedVotes = session.maxVotesPerVoter || 1;
 
   // Sync fullscreen state
@@ -210,17 +221,32 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
     });
 
     if (found) {
-      if (found.hasVoted) {
+      const isVoted = found.status === 'VOTED' || found.hasVoted;
+      const isDelivered = found.status === 'BALLOT_DELIVERED' || (!found.hasVoted && !!found.ballotDeliveredAt);
+
+      if (isVoted) {
         audioFeedback.playDuplicateWarning();
         setScanResult({
           type: 'DUPLICATE',
           voter: found,
-          message: `هشدار رأی تکراری! برای «${found.fullName}» قبلاً در ساعت ${toPersianDigits(found.votedAt || '')} تعرفه صادر شده است.`,
+          message: `هشدار رأی تکراری! برای «${found.fullName}» قبلاً در ساعت ${toPersianDigits(found.votedAt || '')} رأی ثبت شده است.`,
+          timestamp: formatJalali(new Date(), true),
+        });
+      } else if (isDelivered) {
+        audioFeedback.playDuplicateWarning();
+        setScanResult({
+          type: 'DUPLICATE',
+          voter: found,
+          message: `توجه: تعرفه رأی برای «${found.fullName}» قبلاً در ساعت ${toPersianDigits(found.ballotDeliveredAt || '')} تحویل شده است و در انتظار ثبت رأی می‌باشد.`,
           timestamp: formatJalali(new Date(), true),
         });
       } else {
         audioFeedback.playVoterCheckin();
-        await onToggleVoterStatus(found.id);
+        if (onSetVoterStatus) {
+          await onSetVoterStatus(found.id, 'BALLOT_DELIVERED');
+        } else {
+          await onToggleVoterStatus(found.id);
+        }
         
         // Broadcast to master laptop
         syncEngine.broadcast('VOTER_CHECK_IN', {
@@ -231,11 +257,12 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
           operatorName: currentOperator.name || 'اپراتور باجه پذیرش',
         });
 
+        const timeNow = formatJalali(new Date(), true);
         setScanResult({
           type: 'SUCCESS',
-          voter: found,
-          message: `احراز هویت موفق! تعرفه رأی برای «${found.fullName}» با موفقیت صادر گردید.`,
-          timestamp: formatJalali(new Date(), true),
+          voter: { ...found, status: 'BALLOT_DELIVERED', ballotDeliveredAt: timeNow },
+          message: `احراز هویت موفق! تعرفه رأی به «${found.fullName}» تحویل شد.`,
+          timestamp: timeNow,
         });
       }
     } else {
@@ -314,8 +341,9 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
 
       if (!matchesSearch) return false;
 
-      if (filterState === 'VOTED') return v.hasVoted;
-      if (filterState === 'NOT_VOTED') return !v.hasVoted;
+      if (filterState === 'BALLOT_DELIVERED') return v.status === 'BALLOT_DELIVERED' || (!v.hasVoted && !!v.ballotDeliveredAt);
+      if (filterState === 'VOTED') return v.status === 'VOTED' || v.hasVoted;
+      if (filterState === 'NOT_VOTED') return v.status === 'NOT_CHECKED_IN' || (!v.status && !v.hasVoted && !v.ballotDeliveredAt);
       return true;
     });
   }, [voters, searchQuery, filterState]);
@@ -397,9 +425,19 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
             </div>
           </div>
 
+          <div className="bg-slate-900/80 border border-blue-500/30 rounded-2xl p-4 flex items-center justify-between bg-blue-950/10">
+            <div>
+              <p className="text-xs text-blue-400 font-bold">تعرفه تحویل شد</p>
+              <p className="text-2xl font-black text-blue-300 mt-1">{toPersianDigits(ballotDeliveredCount)}</p>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center">
+              <FileCheck className="w-5 h-5" />
+            </div>
+          </div>
+
           <div className="bg-slate-900/80 border border-emerald-500/30 rounded-2xl p-4 flex items-center justify-between bg-emerald-950/10">
             <div>
-              <p className="text-xs text-emerald-400 font-bold">حاضرین / تعرفه صادرشده</p>
+              <p className="text-xs text-emerald-400 font-bold">رای داده شد</p>
               <p className="text-2xl font-black text-emerald-300 mt-1">{toPersianDigits(votedCount)}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
@@ -409,21 +447,11 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
 
           <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs text-slate-400 font-medium">باقیمانده</p>
-              <p className="text-2xl font-black text-slate-300 mt-1">{toPersianDigits(remainingCount)}</p>
+              <p className="text-xs text-slate-400 font-medium">مراجعه نکرده</p>
+              <p className="text-2xl font-black text-amber-400 mt-1">{toPersianDigits(remainingCount)}</p>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-slate-800 text-slate-400 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-slate-800 text-amber-400 flex items-center justify-center">
               <Clock className="w-5 h-5" />
-            </div>
-          </div>
-
-          <div className="bg-slate-900/80 border border-indigo-500/30 rounded-2xl p-4 flex items-center justify-between bg-indigo-950/10">
-            <div>
-              <p className="text-xs text-indigo-300 font-medium">درصد مشارکت لحظه‌ای</p>
-              <p className="text-2xl font-black text-indigo-200 mt-1">٪{toPersianDigits(attendancePercentage)}</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-300 flex items-center justify-center">
-              <Sparkles className="w-5 h-5" />
             </div>
           </div>
         </div>
@@ -555,7 +583,7 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
             </div>
 
             {/* Filter buttons */}
-            <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-2xl border border-slate-800 text-xs">
+            <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-2xl border border-slate-800 text-xs flex-wrap">
               <button
                 onClick={() => setFilterState('ALL')}
                 className={`px-3 py-1.5 rounded-xl font-bold transition-colors ${
@@ -567,6 +595,16 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
                 همه ({toPersianDigits(totalCount)})
               </button>
               <button
+                onClick={() => setFilterState('BALLOT_DELIVERED')}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-colors ${
+                  filterState === 'BALLOT_DELIVERED'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                تعرفه تحویل شد ({toPersianDigits(ballotDeliveredCount)})
+              </button>
+              <button
                 onClick={() => setFilterState('VOTED')}
                 className={`px-3 py-1.5 rounded-xl font-bold transition-colors ${
                   filterState === 'VOTED'
@@ -574,7 +612,7 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                تعرفه صادر شده ({toPersianDigits(votedCount)})
+                رای داده شد ({toPersianDigits(votedCount)})
               </button>
               <button
                 onClick={() => setFilterState('NOT_VOTED')}
@@ -584,7 +622,7 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                حاضر نشده ({toPersianDigits(remainingCount)})
+                مراجعه نکرده ({toPersianDigits(remainingCount)})
               </button>
             </div>
           </div>
@@ -610,8 +648,8 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
                   <th className="py-3 px-4">نام و نام خانوادگی</th>
                   <th className="py-3 px-4">کد ملی</th>
                   <th className="py-3 px-4">شماره همراه</th>
-                  <th className="py-3 px-4 text-center">وضعیت تعرفه</th>
-                  <th className="py-3 px-4 text-center">عملیات پذیرش / بارکد موبایل</th>
+                  <th className="py-3 px-4 text-center">وضعیت تعرفه و رأی</th>
+                  <th className="py-3 px-4 text-center">اقدام / بارکد موبایل / عملیات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
@@ -622,84 +660,164 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  filteredVoters.map((voter, index) => (
-                    <tr
-                      key={voter.id}
-                      className={`hover:bg-slate-850 transition-colors ${
-                        voter.hasVoted ? 'bg-emerald-950/10' : ''
-                      }`}
-                    >
-                      <td className="py-3 px-4 font-mono text-slate-500">{toPersianDigits(index + 1)}</td>
-                      <td className="py-3 px-4 font-bold text-slate-100">{voter.fullName}</td>
-                      <td className="py-3 px-4 font-mono text-slate-300">
-                        {toPersianDigits(voter.nationalIdMasked || maskNationalId(voter.nationalId))}
-                      </td>
-                      <td className="py-3 px-4 font-mono text-slate-400">
-                        {voter.phoneNumber ? toPersianDigits(voter.phoneNumber) : '—'}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        {voter.hasVoted ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>تعرفه صادر شد ({toPersianDigits(voter.votedAt || '')})</span>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700">
-                            <Clock className="w-3.5 h-3.5" />
-                            <span>در انتظار ثبت ورود</span>
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCurrentVoterForQr(voter);
-                              setIsMobileQrModalOpen(true);
-                            }}
-                            className="p-2 rounded-xl bg-slate-800 hover:bg-emerald-500/20 text-slate-400 hover:text-emerald-300 border border-slate-700 transition"
-                            title="تولید و نمایش بارکد اسکن رأی با موبایل برای این شخص"
-                          >
-                            <QrCode className="w-4 h-4" />
-                          </button>
+                  filteredVoters.map((voter, index) => {
+                    const isVoted = voter.status === 'VOTED' || voter.hasVoted;
+                    const isDelivered = voter.status === 'BALLOT_DELIVERED' || (!voter.hasVoted && !!voter.ballotDeliveredAt);
 
-                          <button
-                            onClick={async () => {
-                              if (!voter.hasVoted) {
-                                audioFeedback.playVoterCheckin();
-                              }
-                              await onToggleVoterStatus(voter.id);
-                              syncEngine.broadcast('VOTER_CHECK_IN', {
-                                voterId: voter.id,
-                                voterName: voter.fullName,
-                                newStatus: !voter.hasVoted,
-                                timestamp: new Date().toISOString(),
-                                operatorName: currentOperator.name || 'اپراتور باجه',
-                              });
-                            }}
-                            className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all active:scale-95 flex items-center justify-center gap-1.5 ${
-                              voter.hasVoted
-                                ? 'bg-slate-800 hover:bg-red-500/20 text-slate-300 hover:text-red-300 border border-slate-700'
-                                : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-900/30 ring-2 ring-emerald-500/30'
-                            }`}
-                          >
-                            {voter.hasVoted ? (
+                    return (
+                      <tr
+                        key={voter.id}
+                        className={`hover:bg-slate-850 transition-colors ${
+                          isVoted ? 'bg-emerald-950/10' : isDelivered ? 'bg-blue-950/10' : ''
+                        }`}
+                      >
+                        <td className="py-3 px-4 font-mono text-slate-500">{toPersianDigits(voter.rowNumber || index + 1)}</td>
+                        <td className="py-3 px-4 font-bold text-slate-100">{voter.fullName}</td>
+                        <td className="py-3 px-4 font-mono text-slate-300">
+                          {toPersianDigits(voter.nationalIdMasked || maskNationalId(voter.nationalId))}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-slate-400" dir="ltr">
+                          {voter.phoneNumber ? toPersianDigits(voter.phoneNumber) : '—'}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          {isVoted ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                              <span>رای داده شد {voter.votedAt ? `(${toPersianDigits(voter.votedAt)})` : ''}</span>
+                            </span>
+                          ) : isDelivered ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                              <FileCheck className="w-3.5 h-3.5 text-blue-400" />
+                              <span>تعرفه تحویل شد {voter.ballotDeliveredAt ? `(${toPersianDigits(voter.ballotDeliveredAt)})` : ''}</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700">
+                              <Clock className="w-3.5 h-3.5 text-slate-500" />
+                              <span>مراجعه نکرده</span>
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCurrentVoterForQr(voter);
+                                setIsMobileQrModalOpen(true);
+                              }}
+                              className="p-1.5 rounded-xl bg-slate-800 hover:bg-emerald-500/20 text-slate-400 hover:text-emerald-300 border border-slate-700 transition"
+                              title="تولید و نمایش بارکد اسکن رأی با موبایل برای این شخص"
+                            >
+                              <QrCode className="w-4 h-4" />
+                            </button>
+
+                            {!isDelivered && !isVoted && (
+                              <button
+                                type="button"
+                                disabled={isLocked}
+                                onClick={async () => {
+                                  audioFeedback.playVoterCheckin();
+                                  if (onSetVoterStatus) {
+                                    await onSetVoterStatus(voter.id, 'BALLOT_DELIVERED');
+                                  } else {
+                                    await onToggleVoterStatus(voter.id);
+                                  }
+                                  syncEngine.broadcast('VOTER_CHECK_IN', {
+                                    voterId: voter.id,
+                                    voterName: voter.fullName,
+                                    newStatus: 'BALLOT_DELIVERED',
+                                    timestamp: new Date().toISOString(),
+                                    operatorName: currentOperator.name || 'اپراتور باجه',
+                                  });
+                                }}
+                                className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow transition flex items-center gap-1"
+                                title="تحویل برگه تعرفه به رأی‌دهنده"
+                              >
+                                <FileCheck className="w-3.5 h-3.5" />
+                                <span>تحویل تعرفه</span>
+                              </button>
+                            )}
+
+                            {isDelivered && (
                               <>
-                                <XCircle className="w-3.5 h-3.5" />
-                                <span>لغو تعرفه</span>
-                              </>
-                            ) : (
-                              <>
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>صدور تعرفه</span>
+                                <button
+                                  type="button"
+                                  disabled={isLocked}
+                                  onClick={async () => {
+                                    audioFeedback.playScanSuccess();
+                                    if (onSetVoterStatus) {
+                                      await onSetVoterStatus(voter.id, 'VOTED');
+                                    } else {
+                                      await onToggleVoterStatus(voter.id);
+                                    }
+                                    syncEngine.broadcast('VOTER_CHECK_IN', {
+                                      voterId: voter.id,
+                                      voterName: voter.fullName,
+                                      newStatus: 'VOTED',
+                                      timestamp: new Date().toISOString(),
+                                      operatorName: currentOperator.name || 'اپراتور باجه',
+                                    });
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow transition flex items-center gap-1"
+                                  title="ثبت انداختن رأی در صندوق"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>ثبت رای داده شد</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isLocked}
+                                  onClick={async () => {
+                                    if (onSetVoterStatus) {
+                                      await onSetVoterStatus(voter.id, 'NOT_CHECKED_IN');
+                                    } else {
+                                      await onToggleVoterStatus(voter.id);
+                                    }
+                                  }}
+                                  className="px-2 py-1.5 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700 transition"
+                                  title="لغو تحویل تعرفه"
+                                >
+                                  لغو
+                                </button>
                               </>
                             )}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+
+                            {isVoted && (
+                              <button
+                                type="button"
+                                disabled={isLocked}
+                                onClick={async () => {
+                                  if (onSetVoterStatus) {
+                                    await onSetVoterStatus(voter.id, 'BALLOT_DELIVERED');
+                                  } else {
+                                    await onToggleVoterStatus(voter.id);
+                                  }
+                                }}
+                                className="px-2.5 py-1.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
+                                title="بازگردانی به تعرفه تحویل شد"
+                              >
+                                لغو رأی
+                              </button>
+                            )}
+
+                            {/* Individual Delete Button */}
+                            {onDeleteVoter && (
+                              <button
+                                type="button"
+                                disabled={isLocked}
+                                onClick={() => setVoterToDelete(voter)}
+                                className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-red-950/50 hover:bg-red-900 text-red-300 hover:text-red-100 border border-red-800/60 transition shadow-sm flex items-center gap-1 disabled:opacity-40"
+                                title={`حذف «${voter.fullName}» از فهرست واجدین شرایط`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                                <span>حذف فرد</span>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -912,6 +1030,57 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
               >
                 <ExternalLink className="w-4 h-4" />
                 <span>تست و باز کردن در تب جدید</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Single Voter Confirmation Modal */}
+      {voterToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border-2 border-red-500/60 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 text-slate-100 text-right" dir="rtl">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="p-2.5 bg-red-500/20 rounded-2xl border border-red-500/40">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-base text-white">حذف فرد از فهرست واجدین شرایط</h4>
+                <p className="text-xs text-slate-400">حذف مشخصات رأی‌دهنده انتخاب‌شده</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl text-xs text-slate-300 space-y-1.5">
+              <p>
+                آیا از حذف <strong className="text-white">«{voterToDelete.fullName}»</strong> با کد ملی <code className="text-emerald-400 font-mono">{toPersianDigits(voterToDelete.nationalIdMasked || maskNationalId(voterToDelete.nationalId))}</code> اطمینان دارید؟
+              </p>
+              {(voterToDelete.hasVoted || voterToDelete.status === 'VOTED') && (
+                <p className="text-amber-400 text-[11px] font-bold">
+                  ⚠️ توجه: برای این فرد تعرفه یا رأی ثبت شده بود.
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setVoterToDelete(null)}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeleteVoter) {
+                    onDeleteVoter(voterToDelete.id);
+                  }
+                  setVoterToDelete(null);
+                }}
+                className="px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-red-950/60 transition"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>تأیید و حذف این فرد</span>
               </button>
             </div>
           </div>

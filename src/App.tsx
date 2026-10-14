@@ -12,6 +12,7 @@ import {
   SessionStatus, 
   TieBreakerRule,
   Voter,
+  VoterStatus,
   ArchivedSession
 } from './types/election';
 import { 
@@ -475,7 +476,7 @@ export default function App() {
             setVoters((prev) =>
               prev.map((v) =>
                 v.id === voterId
-                  ? { ...v, hasVoted: true, votedAt: formatJalali(new Date(), true) }
+                  ? { ...v, status: 'VOTED', hasVoted: true, votedAt: formatJalali(new Date(), true) }
                   : v
               )
             );
@@ -579,7 +580,7 @@ export default function App() {
                 setVoters((prev) =>
                   prev.map((vt) =>
                     vt.id === voterId
-                      ? { ...vt, hasVoted: true, votedAt: formatJalali(new Date(), true) }
+                      ? { ...vt, status: 'VOTED', hasVoted: true, votedAt: formatJalali(new Date(), true) }
                       : vt
                   )
                 );
@@ -1243,33 +1244,125 @@ export default function App() {
     });
   };
 
+  // Change specific voter status (NOT_CHECKED_IN -> BALLOT_DELIVERED -> VOTED)
+  const handleSetVoterStatus = async (voterId: string, newStatus: VoterStatus) => {
+    if (session.status === 'LOCKED_FINAL') return;
+    const target = voters.find(v => v.id === voterId);
+    if (!target) return;
+
+    const nowJalali = formatJalali(new Date(), true);
+
+    setVoters(prev => prev.map(v => {
+      if (v.id !== voterId) return v;
+      if (newStatus === 'BALLOT_DELIVERED') {
+        return {
+          ...v,
+          status: 'BALLOT_DELIVERED',
+          ballotDeliveredAt: v.ballotDeliveredAt || nowJalali,
+          hasVoted: false,
+          votedAt: undefined,
+        };
+      }
+      if (newStatus === 'VOTED') {
+        return {
+          ...v,
+          status: 'VOTED',
+          hasVoted: true,
+          votedAt: v.votedAt || nowJalali,
+          ballotDeliveredAt: v.ballotDeliveredAt || nowJalali,
+        };
+      }
+      return {
+        ...v,
+        status: 'NOT_CHECKED_IN',
+        hasVoted: false,
+        votedAt: undefined,
+        ballotDeliveredAt: undefined,
+      };
+    }));
+
+    const statusTitle = newStatus === 'BALLOT_DELIVERED' 
+      ? 'تعرفه تحویل شد' 
+      : newStatus === 'VOTED' 
+      ? 'رای داده شد' 
+      : 'در انتظار مراجعه';
+
+    await appendAuditEvent({
+      operatorName: currentOperator.name || 'اپراتور شعبه',
+      operatorRole: currentOperator.role || 'مسئول',
+      actionType: 'SESSION_STATE_CHANGE',
+      previousValue: target.status || (target.hasVoted ? 'رای داده شد' : 'مراجعه نکرده'),
+      newValue: statusTitle,
+      delta: null,
+      reason: `تغییر وضعیت رأی‌دهنده «${target.fullName}» به «${statusTitle}»`,
+    });
+
+    showFlash(`وضعیت «${target.fullName}» به «${statusTitle}» تغییر یافت.`);
+  };
+
   // Toggle single voter status
   const handleToggleVoterStatus = async (voterId: string) => {
     if (session.status === 'LOCKED_FINAL') return;
     const target = voters.find(v => v.id === voterId);
     if (!target) return;
-    const newStatus = !target.hasVoted;
-    const nowJalali = formatJalali(new Date(), true);
+    
+    const currentStatus: VoterStatus = target.status 
+      ? target.status 
+      : (target.hasVoted ? 'VOTED' : (target.ballotDeliveredAt ? 'BALLOT_DELIVERED' : 'NOT_CHECKED_IN'));
 
-    setVoters(prev => prev.map(v => v.id === voterId ? {
+    let nextStatus: VoterStatus = 'BALLOT_DELIVERED';
+    if (currentStatus === 'NOT_CHECKED_IN') nextStatus = 'BALLOT_DELIVERED';
+    else if (currentStatus === 'BALLOT_DELIVERED') nextStatus = 'VOTED';
+    else nextStatus = 'NOT_CHECKED_IN';
+
+    await handleSetVoterStatus(voterId, nextStatus);
+  };
+
+  // Delete a single voter from the list
+  const handleDeleteSingleVoter = async (voterId: string) => {
+    if (session.status === 'LOCKED_FINAL') return;
+    const target = voters.find(v => v.id === voterId);
+    if (!target) return;
+
+    const remaining = voters.filter(v => v.id !== voterId).map((v, idx) => ({
       ...v,
-      hasVoted: newStatus,
-      votedAt: newStatus ? nowJalali : undefined,
-    } : v));
+      rowNumber: idx + 1,
+    }));
+
+    setVoters(remaining);
+    setSession(prev => ({ ...prev, registeredVotersCount: remaining.length }));
 
     await appendAuditEvent({
-      operatorName: currentOperator.name,
-      operatorRole: currentOperator.role,
-      actionType: 'BALLOT_BLANK_CHANGE',
-      previousValue: target.hasVoted ? 'تعرفه صادر شده بود' : 'عدم حضور',
-      newValue: newStatus ? 'صدور تعرفه و ثبت حضور' : 'لغو صدور تعرفه',
+      operatorName: currentOperator.name || 'اپراتور شعبه',
+      operatorRole: currentOperator.role || 'مسئول',
+      actionType: 'SESSION_STATE_CHANGE',
+      previousValue: target.fullName,
+      newValue: 'حذف از فهرست',
       delta: null,
-      reason: newStatus
-        ? `احراز هویت و صدور برگه رأی برای: ${target.fullName} (${target.nationalIdMasked})`
-        : `ابطال ثبت حضور رأی‌دهنده: ${target.fullName}`,
+      reason: `حذف رأی‌دهنده «${target.fullName}» (${target.nationalIdMasked}) از فهرست واجدین شرایط شعبه`,
     });
 
-    showFlash(newStatus ? `تعرفه رأی برای «${target.fullName}» صادر شد.` : `وضعیت رأی «${target.fullName}» لغو شد.`);
+    showFlash(`«${target.fullName}» با موفقیت از فهرست واجدین شرایط حذف شد.`);
+  };
+
+  // Clear all voters completely
+  const handleClearAllVoters = async () => {
+    if (session.status === 'LOCKED_FINAL') return;
+    const count = voters.length;
+    setVoters([]);
+    setSession(prev => ({ ...prev, registeredVotersCount: 0 }));
+
+    await appendAuditEvent({
+      operatorName: currentOperator.name || 'اپراتور شعبه',
+      operatorRole: currentOperator.role || 'مسئول',
+      actionType: 'SESSION_STATE_CHANGE',
+      previousValue: `${toPersianDigits(count)} واجد شرایط`,
+      newValue: '۰ واجد شرایط (فهرست خالی شد)',
+      delta: null,
+      reason: `حذف و پاک‌سازی کامل اطلاعات تمامی واجدین شرایط شعبه (${toPersianDigits(count)} نفر) توسط اپراتور`,
+    });
+
+    showFlash(`اطلاعات تمامی واجدین شرایط (${toPersianDigits(count)} نفر) با موفقیت حذف گردید.`);
   };
 
   // Update voter list (e.g. from Excel/CSV import)
@@ -1344,6 +1437,9 @@ export default function App() {
           currentOperator={currentOperator}
           isLocked={session.status === 'LOCKED_FINAL'}
           onToggleVoterStatus={handleToggleVoterStatus}
+          onSetVoterStatus={handleSetVoterStatus}
+          onDeleteVoter={handleDeleteSingleVoter}
+          onClearAllVoters={handleClearAllVoters}
           onAddVoter={handleAddVoterQuick}
           onExitTerminal={() => handleSelectStationRole('master')}
         />
@@ -1647,6 +1743,9 @@ export default function App() {
             currentOperator={currentOperator}
             onUpdateVoters={handleUpdateVoters}
             onToggleVoterStatus={handleToggleVoterStatus}
+            onSetVoterStatus={handleSetVoterStatus}
+            onDeleteVoter={handleDeleteSingleVoter}
+            onClearAllVoters={handleClearAllVoters}
           />
         )}
 

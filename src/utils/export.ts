@@ -150,15 +150,24 @@ export function exportVotersTemplateToExcel() {
  */
 export function exportVotersListToExcel(voters: Voter[], stationNumber: string) {
   const wb = XLSX.utils.book_new();
-  const headers = ['ردیف', 'نام و نام خانوادگی', 'کد ملی', 'شماره تماس', 'وضعیت رأی', 'زمان صدور تعرفه'];
-  const rows = voters.map((v) => [
-    v.rowNumber,
-    v.fullName,
-    v.nationalIdMasked,
-    v.phoneNumber,
-    v.hasVoted ? 'رأی داده شده' : 'مراجعه نکرده',
-    v.votedAt ?? '—',
-  ]);
+  const headers = ['ردیف', 'نام و نام خانوادگی', 'کد ملی', 'شماره تماس', 'وضعیت', 'زمان تحویل تعرفه', 'زمان ثبت رأی'];
+  const rows = voters.map((v) => {
+    let statusText = 'مراجعه نکرده';
+    if (v.status === 'VOTED' || v.hasVoted) {
+      statusText = 'رای داده شد';
+    } else if (v.status === 'BALLOT_DELIVERED' || v.ballotDeliveredAt) {
+      statusText = 'تعرفه تحویل شد';
+    }
+    return [
+      v.rowNumber,
+      v.fullName,
+      v.nationalIdMasked,
+      v.phoneNumber,
+      statusText,
+      v.ballotDeliveredAt ?? '—',
+      v.votedAt ?? '—',
+    ];
+  });
   const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
   XLSX.utils.book_append_sheet(wb, ws, 'فهرست واجدین شرایط');
 

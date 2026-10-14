@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Voter, Operator } from '../types/election';
+import { Voter, Operator, VoterStatus } from '../types/election';
 import { toPersianDigits, toEnglishDigits, maskNationalId, formatJalali } from '../utils/persian';
 import { exportVotersTemplateToExcel, exportVotersListToExcel } from '../utils/export';
 import { audioFeedback } from '../utils/audioFeedback';
@@ -25,7 +25,9 @@ import {
   Volume2,
   RefreshCw,
   X,
-  Fingerprint
+  Fingerprint,
+  Trash2,
+  FileCheck
 } from 'lucide-react';
 
 interface VotersTabProps {
@@ -34,6 +36,9 @@ interface VotersTabProps {
   currentOperator: Operator;
   onUpdateVoters: (newVoters: Voter[], reason: string) => void;
   onToggleVoterStatus: (voterId: string) => void;
+  onSetVoterStatus?: (voterId: string, status: VoterStatus) => void;
+  onDeleteVoter?: (voterId: string) => void;
+  onClearAllVoters?: () => void;
 }
 
 export const VotersTab: React.FC<VotersTabProps> = ({
@@ -41,10 +46,15 @@ export const VotersTab: React.FC<VotersTabProps> = ({
   isLocked,
   onUpdateVoters,
   onToggleVoterStatus,
+  onSetVoterStatus,
+  onDeleteVoter,
+  onClearAllVoters,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterState, setFilterState] = useState<'ALL' | 'VOTED' | 'NOT_VOTED'>('ALL');
+  const [filterState, setFilterState] = useState<'ALL' | 'BALLOT_DELIVERED' | 'VOTED' | 'NOT_VOTED'>('ALL');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isClearAllModalOpen, setIsClearAllModalOpen] = useState(false);
+  const [voterToDelete, setVoterToDelete] = useState<Voter | null>(null);
   const [newName, setNewName] = useState('');
   const [newNationalId, setNewNationalId] = useState('');
   const [newPhone, setNewPhone] = useState('');
@@ -120,24 +130,39 @@ export const VotersTab: React.FC<VotersTabProps> = ({
     });
 
     if (found) {
-      if (found.hasVoted) {
+      const isVoted = found.status === 'VOTED' || found.hasVoted;
+      const isDelivered = found.status === 'BALLOT_DELIVERED' || (!found.hasVoted && !!found.ballotDeliveredAt);
+
+      if (isVoted) {
         // DUPLICATE VOTING ALERT!
         audioFeedback.playDuplicateWarning();
         setScanResult({
           type: 'DUPLICATE',
           voter: found,
-          message: `⚠️ هشدار تقلب! رأی‌دهنده «${found.fullName}» قبلاً در ساعت ${found.votedAt || 'نامشخص'} تعرفه دریافت نموده و رأی داده است! صدور مجدد تعرفه غیرمجاز است.`,
+          message: `⚠️ هشدار تقلب! برای رأی‌دهنده «${found.fullName}» قبلاً در ساعت ${toPersianDigits(found.votedAt || '')} رأی ثبت شده است! صدور مجدد تعرفه غیرمجاز است.`,
+          timestamp: formatJalali(new Date(), true),
+        });
+      } else if (isDelivered) {
+        audioFeedback.playDuplicateWarning();
+        setScanResult({
+          type: 'DUPLICATE',
+          voter: found,
+          message: `⚠️ توجه: تعرفه رأی برای «${found.fullName}» قبلاً در ساعت ${toPersianDigits(found.ballotDeliveredAt || '')} تحویل شده است و در انتظار ثبت رأی می‌باشد.`,
           timestamp: formatJalali(new Date(), true),
         });
       } else {
         // SUCCESS CHECK-IN & ISSUE BALLOT
         audioFeedback.playScanSuccess();
-        onToggleVoterStatus(found.id);
         const timeNow = formatJalali(new Date(), true);
+        if (onSetVoterStatus) {
+          onSetVoterStatus(found.id, 'BALLOT_DELIVERED');
+        } else {
+          onToggleVoterStatus(found.id);
+        }
         setScanResult({
           type: 'SUCCESS',
-          voter: { ...found, hasVoted: true, votedAt: timeNow },
-          message: `✅ احراز هویت موفق: «${found.fullName}» (ردیف ${toPersianDigits(found.rowNumber)}) — حضور ثبت و تعرفه رأی صادر گردید.`,
+          voter: { ...found, status: 'BALLOT_DELIVERED', ballotDeliveredAt: timeNow },
+          message: `✅ احراز هویت موفق: تعرفه رأی برای «${found.fullName}» (ردیف ${toPersianDigits(found.rowNumber)}) تحویل شد.`,
           timestamp: timeNow,
         });
       }
@@ -152,7 +177,7 @@ export const VotersTab: React.FC<VotersTabProps> = ({
       setIsQuickRegisterOpen(true);
       setScanResult({
         type: 'NOT_FOUND',
-        message: `کد ملی ${toPersianDigits(cleanNId)} در فهرست واجدین شرایط (اکسل) ثبت نشده است. لطفاً نام رأی‌دهنده را وارد کنید تا فوراً ثبت و تعرفه صادر گردد.`,
+        message: `کد ملی ${toPersianDigits(cleanNId)} در فهرست واجدین شرایط (اکسل) ثبت نشده است. لطفاً نام رأی‌دهنده را وارد کنید تا فوراً ثبت و تعرفه تحویل گردد.`,
         timestamp: formatJalali(new Date(), true),
       });
       setBarcodeInput('');
@@ -181,20 +206,21 @@ export const VotersTab: React.FC<VotersTabProps> = ({
       nationalId: quickNId,
       nationalIdMasked: maskNationalId(quickNId),
       phoneNumber: toEnglishDigits(quickPhone).trim() || '—',
-      hasVoted: true,
-      votedAt: timeNow,
+      hasVoted: false,
+      status: 'BALLOT_DELIVERED',
+      ballotDeliveredAt: timeNow,
     };
 
     onUpdateVoters(
       [...voters, newVoter],
-      `ثبت حضور و صدور تعرفه با بارکدخوان کارت ملی: ${newVoter.fullName} (${newVoter.nationalIdMasked})`
+      `ثبت حضور و تحویل تعرفه با بارکدخوان کارت ملی: ${newVoter.fullName} (${newVoter.nationalIdMasked})`
     );
 
     audioFeedback.playScanSuccess();
     setScanResult({
       type: 'SUCCESS',
       voter: newVoter,
-      message: `✅ ثبت دستی و صدور موفق تعرفه: «${newVoter.fullName}» با کد ملی ${toPersianDigits(newVoter.nationalIdMasked)} به فهرست اضافه و تعرفه تحویل شد.`,
+      message: `✅ ثبت دستی و تحویل موفق تعرفه: «${newVoter.fullName}» با کد ملی ${toPersianDigits(newVoter.nationalIdMasked)} به فهرست اضافه و تعرفه تحویل شد.`,
       timestamp: timeNow,
     });
 
@@ -206,19 +232,26 @@ export const VotersTab: React.FC<VotersTabProps> = ({
 
   // Stats
   const totalCount = voters.length;
-  const votedCount = voters.filter(v => v.hasVoted).length;
-  const remainingCount = totalCount - votedCount;
-  const turnoutPercent = totalCount > 0 ? ((votedCount / totalCount) * 100).toFixed(1) : '0';
+  const ballotDeliveredCount = voters.filter(v => v.status === 'BALLOT_DELIVERED' || (!v.hasVoted && !!v.ballotDeliveredAt)).length;
+  const votedCount = voters.filter(v => v.status === 'VOTED' || v.hasVoted).length;
+  const remainingCount = voters.filter(v => (v.status === 'NOT_CHECKED_IN' || (!v.status && !v.hasVoted && !v.ballotDeliveredAt))).length;
+  const turnoutPercent = totalCount > 0 ? (((votedCount + ballotDeliveredCount) / totalCount) * 100).toFixed(1) : '0';
 
   // Filtered
   const filteredVoters = voters.filter((v) => {
-    if (filterState === 'VOTED' && !v.hasVoted) return false;
-    if (filterState === 'NOT_VOTED' && v.hasVoted) return false;
+    const isVoted = v.status === 'VOTED' || v.hasVoted;
+    const isDelivered = v.status === 'BALLOT_DELIVERED' || (!v.hasVoted && !!v.ballotDeliveredAt);
+    const isNotAttended = !isVoted && !isDelivered;
+
+    if (filterState === 'VOTED' && !isVoted) return false;
+    if (filterState === 'BALLOT_DELIVERED' && !isDelivered) return false;
+    if (filterState === 'NOT_VOTED' && !isNotAttended) return false;
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       const matchName = v.fullName.toLowerCase().includes(q);
-      const matchNId = v.nationalId.includes(toEnglishDigits(q)) || v.nationalIdMasked.includes(q);
-      const matchPhone = v.phoneNumber.includes(toEnglishDigits(q)) || v.phoneNumber.includes(q);
+      const matchNId = (v.nationalId || '').includes(toEnglishDigits(q)) || (v.nationalIdMasked || '').includes(q);
+      const matchPhone = (v.phoneNumber || '').includes(toEnglishDigits(q)) || (v.phoneNumber || '').includes(q);
       const matchRow = String(v.rowNumber) === toEnglishDigits(q);
       return matchName || matchNId || matchPhone || matchRow;
     }
@@ -379,6 +412,18 @@ export const VotersTab: React.FC<VotersTabProps> = ({
             onChange={handleFileUpload}
             className="hidden"
           />
+
+          {/* Delete All Voters Button (Requested by User: دکمه حذف اطلاعات همه‌ی واجدین کنار دکمه بارگذاری اکسل) */}
+          <button
+            type="button"
+            disabled={isLocked || voters.length === 0}
+            onClick={() => setIsClearAllModalOpen(true)}
+            className="px-3.5 py-2 bg-red-950/70 hover:bg-red-900 border border-red-700/80 text-red-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-md transition disabled:opacity-40 disabled:cursor-not-allowed"
+            title={voters.length === 0 ? "فهرست واجدین شرایط در حال حاضر خالی است" : "حذف کامل کلیه اطلاعات واجدین شرایط"}
+          >
+            <Trash2 className="w-4 h-4 text-red-400" />
+            <span>حذف اطلاعات همه‌ی واجدین</span>
+          </button>
 
           {/* Export Voters to .xlsx */}
           {voters.length > 0 && (
@@ -573,10 +618,17 @@ export const VotersTab: React.FC<VotersTabProps> = ({
           </strong>
         </div>
 
-        <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-4">
-          <span className="text-xs text-slate-400 block">تعداد تعرفه‌های صادر شده (رأی داده)</span>
-          <strong className="text-2xl font-black text-emerald-400 font-mono mt-1 block">
-            {toPersianDigits(votedCount)} <span className="text-xs text-slate-400 font-sans">نفر</span>
+        <div className="bg-slate-800/80 border border-blue-500/30 rounded-2xl p-4 bg-blue-950/10">
+          <span className="text-xs text-blue-400 font-bold block">تعرفه تحویل شد</span>
+          <strong className="text-2xl font-black text-blue-300 font-mono mt-1 block">
+            {toPersianDigits(ballotDeliveredCount)} <span className="text-xs text-blue-400/80 font-sans">نفر</span>
+          </strong>
+        </div>
+
+        <div className="bg-slate-800/80 border border-emerald-500/30 rounded-2xl p-4 bg-emerald-950/10">
+          <span className="text-xs text-emerald-400 font-bold block">رای داده شد</span>
+          <strong className="text-2xl font-black text-emerald-300 font-mono mt-1 block">
+            {toPersianDigits(votedCount)} <span className="text-xs text-emerald-400/80 font-sans">نفر</span>
           </strong>
         </div>
 
@@ -586,18 +638,11 @@ export const VotersTab: React.FC<VotersTabProps> = ({
             {toPersianDigits(remainingCount)} <span className="text-xs text-slate-400 font-sans">نفر</span>
           </strong>
         </div>
-
-        <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-4">
-          <span className="text-xs text-slate-400 block">درصد مشارکت حضوری</span>
-          <strong className="text-2xl font-black text-teal-300 font-mono mt-1 block">
-            {toPersianDigits(turnoutPercent)}٪
-          </strong>
-        </div>
       </div>
 
       {/* Search and Filters (Hidden in print) */}
       <div className="no-print flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-800/50 p-3 rounded-2xl border border-slate-800">
-        <div className="relative w-full sm:w-96">
+        <div className="relative w-full sm:w-80">
           <Search className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
           <input
             type="text"
@@ -610,24 +655,30 @@ export const VotersTab: React.FC<VotersTabProps> = ({
 
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <Filter className="w-4 h-4 text-slate-400 flex-shrink-0" />
-          <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700 text-xs">
+          <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700 text-xs flex-wrap">
             <button
               onClick={() => setFilterState('ALL')}
-              className={`px-3 py-1 rounded-lg transition ${filterState === 'ALL' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:text-white'}`}
+              className={`px-3 py-1 rounded-lg transition ${filterState === 'ALL' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-white'}`}
             >
               همه ({toPersianDigits(totalCount)})
+            </button>
+            <button
+              onClick={() => setFilterState('BALLOT_DELIVERED')}
+              className={`px-3 py-1 rounded-lg transition ${filterState === 'BALLOT_DELIVERED' ? 'bg-blue-600 text-white font-bold' : 'text-slate-400 hover:text-white'}`}
+            >
+              تعرفه تحویل شد ({toPersianDigits(ballotDeliveredCount)})
             </button>
             <button
               onClick={() => setFilterState('VOTED')}
               className={`px-3 py-1 rounded-lg transition ${filterState === 'VOTED' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:text-white'}`}
             >
-              رأی‌داده ({toPersianDigits(votedCount)})
+              رای داده شد ({toPersianDigits(votedCount)})
             </button>
             <button
               onClick={() => setFilterState('NOT_VOTED')}
-              className={`px-3 py-1 rounded-lg transition ${filterState === 'NOT_VOTED' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:text-white'}`}
+              className={`px-3 py-1 rounded-lg transition ${filterState === 'NOT_VOTED' ? 'bg-amber-600 text-white font-bold' : 'text-slate-400 hover:text-white'}`}
             >
-              باقی‌مانده ({toPersianDigits(remainingCount)})
+              مراجعه نکرده ({toPersianDigits(remainingCount)})
             </button>
           </div>
         </div>
@@ -643,54 +694,140 @@ export const VotersTab: React.FC<VotersTabProps> = ({
                 <th className="py-3 px-4">نام و نام خانوادگی</th>
                 <th className="py-3 px-4">کد ملی (محافظت‌شده)</th>
                 <th className="py-3 px-4">شماره تماس / همراه</th>
-                <th className="py-3 px-4 text-center">وضعیت رأی</th>
-                <th className="py-3 px-4 text-center">اقدام منشی شعبه</th>
+                <th className="py-3 px-4 text-center">وضعیت تعرفه و رأی</th>
+                <th className="py-3 px-4 text-center">اقدام منشی شعبه / عملیات</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-700/60 text-slate-200">
-              {filteredVoters.map((voter) => (
-                <tr key={voter.id} className="hover:bg-slate-700/40 transition">
-                  <td className="py-3 px-4 font-mono font-bold text-slate-400">
-                    {toPersianDigits(voter.rowNumber)}
-                  </td>
-                  <td className="py-3 px-4 font-bold text-white">
-                    {voter.fullName}
-                  </td>
-                  <td className="py-3 px-4 font-mono text-slate-300">
-                    {voter.nationalIdMasked}
-                  </td>
-                  <td className="py-3 px-4 font-mono text-slate-300" dir="ltr">
-                    {toPersianDigits(voter.phoneNumber)}
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    {voter.hasVoted ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>رأی داده شد</span>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] text-slate-400 bg-slate-800 border border-slate-700">
-                        <XCircle className="w-3.5 h-3.5 text-slate-500" />
-                        <span>مراجعه نکرده</span>
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    <button
-                      type="button"
-                      disabled={isLocked}
-                      onClick={() => onToggleVoterStatus(voter.id)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
-                        voter.hasVoted
-                          ? 'bg-slate-700 hover:bg-slate-600 text-slate-300'
-                          : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-950/40'
-                      }`}
-                    >
-                      {voter.hasVoted ? 'لغو ثبت رأی' : 'ثبت رأی و تحویل تعرفه'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {filteredVoters.map((voter) => {
+                const isVoted = voter.status === 'VOTED' || voter.hasVoted;
+                const isDelivered = voter.status === 'BALLOT_DELIVERED' || (!voter.hasVoted && !!voter.ballotDeliveredAt);
+
+                return (
+                  <tr key={voter.id} className="hover:bg-slate-700/40 transition">
+                    <td className="py-3 px-4 font-mono font-bold text-slate-400">
+                      {toPersianDigits(voter.rowNumber)}
+                    </td>
+                    <td className="py-3 px-4 font-bold text-white">
+                      {voter.fullName}
+                    </td>
+                    <td className="py-3 px-4 font-mono text-slate-300">
+                      {voter.nationalIdMasked}
+                    </td>
+                    <td className="py-3 px-4 font-mono text-slate-300" dir="ltr">
+                      {toPersianDigits(voter.phoneNumber)}
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      {isVoted ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>رای داده شد {voter.votedAt ? `(${toPersianDigits(voter.votedAt)})` : ''}</span>
+                        </span>
+                      ) : isDelivered ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow-sm">
+                          <FileCheck className="w-3.5 h-3.5 text-blue-400" />
+                          <span>تعرفه تحویل شد {voter.ballotDeliveredAt ? `(${toPersianDigits(voter.ballotDeliveredAt)})` : ''}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] text-slate-400 bg-slate-800 border border-slate-700">
+                          <Clock className="w-3.5 h-3.5 text-slate-500" />
+                          <span>مراجعه نکرده</span>
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                        {!isDelivered && !isVoted && (
+                          <button
+                            type="button"
+                            disabled={isLocked}
+                            onClick={() => {
+                              audioFeedback.playVoterCheckin();
+                              if (onSetVoterStatus) {
+                                onSetVoterStatus(voter.id, 'BALLOT_DELIVERED');
+                              } else {
+                                onToggleVoterStatus(voter.id);
+                              }
+                            }}
+                            className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow transition flex items-center gap-1"
+                            title="تحویل برگه تعرفه به رأی‌دهنده"
+                          >
+                            <FileCheck className="w-3.5 h-3.5" />
+                            <span>تحویل تعرفه</span>
+                          </button>
+                        )}
+
+                        {isDelivered && (
+                          <>
+                            <button
+                              type="button"
+                              disabled={isLocked}
+                              onClick={() => {
+                                audioFeedback.playScanSuccess();
+                                if (onSetVoterStatus) {
+                                  onSetVoterStatus(voter.id, 'VOTED');
+                                } else {
+                                  onToggleVoterStatus(voter.id);
+                                }
+                              }}
+                              className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow transition flex items-center gap-1"
+                              title="تایید انداختن رأی در صندوق"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>ثبت رای داده شد</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isLocked}
+                              onClick={() => {
+                                if (onSetVoterStatus) {
+                                  onSetVoterStatus(voter.id, 'NOT_CHECKED_IN');
+                                } else {
+                                  onToggleVoterStatus(voter.id);
+                                }
+                              }}
+                              className="px-2 py-1.5 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700 transition"
+                              title="لغو تحویل تعرفه"
+                            >
+                              لغو
+                            </button>
+                          </>
+                        )}
+
+                        {isVoted && (
+                          <button
+                            type="button"
+                            disabled={isLocked}
+                            onClick={() => {
+                              if (onSetVoterStatus) {
+                                onSetVoterStatus(voter.id, 'BALLOT_DELIVERED');
+                              } else {
+                                onToggleVoterStatus(voter.id);
+                              }
+                            }}
+                            className="px-2.5 py-1.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
+                            title="بازگردانی به وضعیت تعرفه تحویل شد"
+                          >
+                            لغو رأی
+                          </button>
+                        )}
+
+                        {/* Individual Delete Button (Requested: در لیست دکمه حذف فرد ایجاد کن) */}
+                        <button
+                          type="button"
+                          disabled={isLocked}
+                          onClick={() => setVoterToDelete(voter)}
+                          className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-red-950/50 hover:bg-red-900 text-red-300 hover:text-red-100 border border-red-800/60 transition shadow-sm flex items-center gap-1 disabled:opacity-40"
+                          title={`حذف «${voter.fullName}» از فهرست واجدین شرایط`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                          <span>حذف فرد</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -932,6 +1069,106 @@ export const VotersTab: React.FC<VotersTabProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Clear All Voters Confirmation Modal (Requested: دکمه حذف اطلاعات همه ی واجدین) */}
+      {isClearAllModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border-2 border-red-500/70 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 text-slate-100 text-right" dir="rtl">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="p-2.5 bg-red-500/20 rounded-2xl border border-red-500/40">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="font-black text-base text-white">حذف کامل اطلاعات تمامی واجدین شرایط</h4>
+                <p className="text-xs text-red-300">هشدار: این عملیات غیرقابل بازگشت است</p>
+              </div>
+            </div>
+
+            <div className="bg-red-950/30 border border-red-800/60 p-4 rounded-2xl text-xs text-red-200 leading-relaxed">
+              آیا از حذف اطلاعات تمامی <strong className="text-white font-mono">{toPersianDigits(voters.length)}</strong> نفر واجد شرایط موجود در این جلسه انتخابات اطمینان کامل دارید؟ کلیه اسامی، سوابق کدهای ملی و وضعیت تعرفه‌ها پاک خواهند شد.
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsClearAllModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onClearAllVoters) {
+                    onClearAllVoters();
+                  } else {
+                    onUpdateVoters([], 'حذف کامل اطلاعات تمامی واجدین شرایط توسط اپراتور');
+                  }
+                  setIsClearAllModalOpen(false);
+                }}
+                className="px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white font-black rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-red-950/60 transition"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>بله، حذف اطلاعات همه‌ی واجدین</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Single Voter Confirmation Modal (Requested: در لیست دکمه حذف فرد ایجاد کن) */}
+      {voterToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border-2 border-red-500/60 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 text-slate-100 text-right" dir="rtl">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="p-2.5 bg-red-500/20 rounded-2xl border border-red-500/40">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-bold text-base text-white">حذف فرد از فهرست واجدین شرایط</h4>
+                <p className="text-xs text-slate-400">حذف مشخصات رأی‌دهنده انتخاب‌شده</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl text-xs text-slate-300 space-y-1.5">
+              <p>
+                آیا از حذف <strong className="text-white">«{voterToDelete.fullName}»</strong> با کد ملی <code className="text-emerald-400 font-mono">{toPersianDigits(voterToDelete.nationalIdMasked)}</code> از فهرست اطمینان دارید؟
+              </p>
+              {(voterToDelete.hasVoted || voterToDelete.status === 'VOTED') && (
+                <p className="text-amber-400 text-[11px] font-bold">
+                  ⚠️ توجه: برای این فرد تعرفه یا رأی ثبت شده بود.
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setVoterToDelete(null)}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeleteVoter) {
+                    onDeleteVoter(voterToDelete.id);
+                  } else {
+                    const remaining = voters.filter(v => v.id !== voterToDelete.id).map((v, idx) => ({ ...v, rowNumber: idx + 1 }));
+                    onUpdateVoters(remaining, `حذف رأی‌دهنده «${voterToDelete.fullName}» از فهرست واجدین شرایط`);
+                  }
+                  setVoterToDelete(null);
+                }}
+                className="px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-red-950/60 transition"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>تأیید و حذف این فرد</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -1,4 +1,4 @@
-import { Candidate, ElectionSession, Operator, AuditEvent } from '../types/election';
+import { Candidate, ElectionSession, Operator, AuditEvent, VoterStatus } from '../types/election';
 import { formatJalali, generateValidSyntheticNationalId, maskNationalId } from './persian';
 
 export const INITIAL_OPERATORS: Operator[] = [
@@ -67,6 +67,8 @@ export function createInitialVoters() {
       phoneNumber: item.phone,
       hasVoted: item.voted,
       votedAt: item.voted ? '۱۴۰۳/۰۷/۱۹ - ۱۰:۱۵' : undefined,
+      status: (item.voted ? 'VOTED' : 'NOT_CHECKED_IN') as VoterStatus,
+      ballotDeliveredAt: item.voted ? '۱۴۰۳/۰۷/۱۹ - ۱۰:۱۰' : undefined,
     };
   });
 }

@@ -116,6 +116,8 @@ export interface Operator {
   phoneNumber?: string;
 }
 
+export type VoterStatus = 'NOT_CHECKED_IN' | 'BALLOT_DELIVERED' | 'VOTED';
+
 export interface Voter {
   id: string;
   rowNumber: number;
@@ -125,6 +127,8 @@ export interface Voter {
   phoneNumber: string; // شماره تماس / همراه
   hasVoted: boolean;
   votedAt?: string;
+  status?: VoterStatus;
+  ballotDeliveredAt?: string;
 }
 
 export interface BallotPaperConfig {
