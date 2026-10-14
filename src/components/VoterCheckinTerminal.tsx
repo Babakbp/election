@@ -818,6 +818,45 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
               )}
             </div>
 
+            {/* Host / IP Configuration Details */}
+            <div className="mb-3 text-right">
+              <details className="text-xs bg-slate-950/60 border border-slate-800 rounded-xl p-2.5">
+                <summary className="text-slate-400 hover:text-slate-200 cursor-pointer font-bold select-none flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Radio className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>آدرس شبکه و لینک بارکد (IP و پورت)</span>
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-mono dir-ltr truncate max-w-[180px]">{mobileVotingUrl}</span>
+                </summary>
+                <div className="mt-2.5 pt-2 border-t border-slate-800 space-y-2">
+                  <label className="block text-[11px] text-slate-300">
+                    آدرس IP اختصاصی جهت اسکن با گوشی در وای‌فای:
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={customHost}
+                      onChange={(e) => setCustomHost(e.target.value)}
+                      placeholder={networkIp ? `${networkIp}:3000` : (typeof window !== 'undefined' ? window.location.host : '192.168.1.X:3000')}
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono dir-ltr focus:outline-none focus:border-emerald-500"
+                    />
+                    {customHost && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomHost('')}
+                        className="px-2.5 py-1 text-[11px] bg-slate-800 text-slate-300 rounded hover:bg-slate-700"
+                      >
+                        پیش‌فرض
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    نکته: تلفن همراه رأی‌دهنده باید به همان شبکه Wi-Fi محلی متصل باشد تا صفحه اخذ رأی بارگذاری شود.
+                  </p>
+                </div>
+              </details>
+            </div>
+
             <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-2xl p-3 text-xs text-emerald-200 text-right space-y-1.5 mb-4">
               <div className="flex items-center gap-2 font-bold text-emerald-300">
                 <Sparkles className="w-4 h-4" />
