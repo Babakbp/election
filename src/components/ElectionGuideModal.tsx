@@ -24,8 +24,15 @@ import {
   ExternalLink,
   Layers,
   MonitorPlay,
+  Monitor,
   Printer,
-  Archive
+  Archive,
+  Copy,
+  Check,
+  Cable,
+  Wifi,
+  Laptop,
+  Maximize2
 } from 'lucide-react';
 import { toPersianDigits } from '../utils/persian';
 
@@ -48,8 +55,16 @@ export const ElectionGuideModal: React.FC<ElectionGuideModalProps> = ({
   onOpenBackup,
   onOpenSecurity,
 }) => {
-  const [activeSection, setActiveSection] = useState<'STEPS' | 'TOOLS' | 'TIPS'>('STEPS');
+  const [activeSection, setActiveSection] = useState<'STEPS' | 'PROJECTOR' | 'TOOLS' | 'TIPS'>('STEPS');
   const [searchQuery, setSearchQuery] = useState('');
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  const handleCopyProjectorLink = () => {
+    const url = typeof window !== 'undefined' ? `${window.location.origin}/?station=projector` : '/?station=projector';
+    navigator.clipboard.writeText(url);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
+  };
 
   if (!isOpen) return null;
 
@@ -146,8 +161,13 @@ export const ElectionGuideModal: React.FC<ElectionGuideModalProps> = ({
           tab: 'VOTING' as const,
         },
         {
-          label: 'نمایشگر زنده سالن (پروژکتور)',
+          label: 'آموزش تفکیک پروژکتور (Extend)',
           icon: Tv,
+          specialAction: 'SHOW_PROJECTOR_GUIDE',
+        },
+        {
+          label: 'باز کردن پروژکتور سالن',
+          icon: MonitorPlay,
           specialAction: 'PROJECTOR',
         },
       ],
@@ -155,7 +175,7 @@ export const ElectionGuideModal: React.FC<ElectionGuideModalProps> = ({
         'در بالای صفحه وضعیت جلسه را به «شمارش زنده حضوری فعال است» تغییر دهید.',
         'اپراتور می‌تواند با وارد کردن کد نامزد و زدن Enter (یا کلیک روی نامزد)، به سرعت هر رأی را ثبت کند.',
         'ثبت آرای باطله (سفید، خط‌خورده، مخدوش، نام غیرمجاز) با دکمه‌های اختصاصی تعبیه شده انجام می‌شود.',
-        'دکمه «نمایشگر سالن» را باز کنید و روی ویدئو پروژکتور یا مانیتور رو به حضار قرار دهید تا نمودارها و آمار لحظه‌ای با بالاترین سطح شفافیت به نمایش درآید.',
+        'تفکیک پروژکتور سالن از لپ‌تاپ اپراتور: کابل تصویر را به ویدئو پروژکتور متصل کنید، در ویندوز کلیدهای Win + P را بزنید و گزینه Extend (توسعه) را انتخاب نمایید. سپس روی دکمه «پروژکتور سالن» کلیک کرده و «باز کردن در پنجره مستقل» را بزنید. پنجره باز شده را با ماوس به داخل پرده پروژکتور برده و F11 را بزنید تا تمام‌صفحه شود. در این حالت لپ‌تاپ اپراتور برای ثبت رأی کاملاً آزاد می‌ماند و سالن فقط نمودارهای زنده را می‌بیند.',
         'امکان لغو سریع آخرین رأی ثبت‌شده (Undo) در صورت اشتباه سهوی اپراتور فراهم است.',
       ],
     },
@@ -358,6 +378,10 @@ export const ElectionGuideModal: React.FC<ElectionGuideModalProps> = ({
   ];
 
   const handleActionClick = (action: { tab?: any; specialAction?: string; isDirectExport?: boolean }) => {
+    if (action.specialAction === 'SHOW_PROJECTOR_GUIDE') {
+      setActiveSection('PROJECTOR');
+      return;
+    }
     onClose();
     if (action.tab && onNavigateTab) {
       onNavigateTab(action.tab);
@@ -434,7 +458,7 @@ export const ElectionGuideModal: React.FC<ElectionGuideModalProps> = ({
 
         {/* Section Navigation Tabs & Search */}
         <div className="px-4 sm:px-6 py-3 bg-slate-900 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          {/* Main 3 Section Tabs */}
+          {/* Main 4 Section Tabs */}
           <div className="flex items-center gap-1.5 bg-slate-950/70 p-1 rounded-2xl border border-slate-800 self-start sm:self-auto overflow-x-auto">
             <button
               onClick={() => setActiveSection('STEPS')}
@@ -445,7 +469,21 @@ export const ElectionGuideModal: React.FC<ElectionGuideModalProps> = ({
               }`}
             >
               <CheckCircle2 className="w-4 h-4 text-sky-300" />
-              <span>مراحل برگزاری انتخابات ({toPersianDigits(6)} گام)</span>
+              <span>مراحل برگزاری ({toPersianDigits(6)} گام)</span>
+            </button>
+
+            {/* Dedicated Projector Dual-Display Guide Tab (User Requested) */}
+            <button
+              onClick={() => setActiveSection('PROJECTOR')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+                activeSection === 'PROJECTOR'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+              }`}
+            >
+              <Tv className="w-4 h-4 text-indigo-400" />
+              <span>راهنمای پروژکتور سالن (Extend)</span>
+              <span className="bg-indigo-500/20 text-indigo-300 text-[10px] px-1.5 py-0.2 rounded-full font-bold">پاسخ به سوال</span>
             </button>
 
             <button
@@ -457,7 +495,7 @@ export const ElectionGuideModal: React.FC<ElectionGuideModalProps> = ({
               }`}
             >
               <Layers className="w-4 h-4 text-sky-300" />
-              <span>معرفی ابزارها و امکانات ({toPersianDigits(10)} ابزار)</span>
+              <span>معرفی ابزارها ({toPersianDigits(10)} ابزار)</span>
             </button>
 
             <button
@@ -469,7 +507,7 @@ export const ElectionGuideModal: React.FC<ElectionGuideModalProps> = ({
               }`}
             >
               <Sparkles className="w-4 h-4 text-sky-300" />
-              <span>میانبرها و نکات کاربردی</span>
+              <span>میانبرها و نکات</span>
             </button>
           </div>
 
@@ -569,6 +607,227 @@ export const ElectionGuideModal: React.FC<ElectionGuideModalProps> = ({
                     موردی منطبق با عبارت «{searchQuery}» در مراحل انتخابات یافت نشد.
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* SECTION: Dedicated Projector Dual-Display Guide (User Requested: توضیحات فعال کردن صفحه پروژکتور) */}
+          {activeSection === 'PROJECTOR' && (
+            <div className="space-y-6">
+              {/* Question & Answer Hero Banner */}
+              <div className="bg-gradient-to-r from-indigo-950/70 via-slate-900 to-indigo-950/40 border-2 border-indigo-500/50 rounded-3xl p-5 sm:p-6 shadow-xl relative overflow-hidden">
+                <div className="flex items-start gap-4">
+                  <div className="p-3 bg-indigo-600/30 border border-indigo-400/40 text-indigo-300 rounded-2xl flex-shrink-0 mt-1">
+                    <Tv className="w-7 h-7" />
+                  </div>
+                  <div className="space-y-2 flex-1 min-w-0">
+                    <span className="inline-block bg-indigo-500/30 text-indigo-200 text-xs font-bold px-3 py-1 rounded-full border border-indigo-400/30">
+                      پاسخ رسمی به سوال متداول کاربران
+                    </span>
+                    <h3 className="text-base sm:text-lg font-black text-white leading-snug">
+                      چطور صفحه پروژکتور سالن جدا نمایش داده می‌شود تا اپراتور عملیات ثبت رأی را انجام دهد و سالن فقط صفحه پروژکتور را ببیند؟
+                    </h3>
+                    <p className="text-xs sm:text-sm text-slate-300 leading-relaxed pt-1">
+                      این قابلیت با استفاده از ویژگی استاندارد <strong className="text-indigo-300">«نمایشگر دوگانه (Dual Display / Extend)»</strong> در سیستم‌عامل ویندوز انجام می‌شود. بدین ترتیب مانیتور لپ‌تاپ شما برای کاربری و ثبت آرا کاملاً مستقل می‌ماند و پروژکتور سالن فقط صفحه اختصاصی نمودارهای زنده و نتایج را بدون ابزارهای مدیریتی پخش می‌کند.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Interactive Action Bar */}
+                <div className="mt-5 pt-4 border-t border-indigo-500/30 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.open('/?station=projector', '_blank');
+                        onClose();
+                      }}
+                      className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs flex items-center gap-2 transition shadow-lg shadow-indigo-900/40 active:scale-95"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      <span>همین حالا تست کنید: باز کردن پروژکتور در پنجره مستقل</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onOpenProjector) {
+                          onOpenProjector();
+                          onClose();
+                        }
+                      }}
+                      className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center gap-2 transition border border-slate-700 active:scale-95"
+                    >
+                      <Tv className="w-4 h-4 text-emerald-400" />
+                      <span>پیش‌نمایش پروژکتور در همین پنجره</span>
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleCopyProjectorLink}
+                    className="px-3 py-2 bg-slate-900/90 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-mono flex items-center gap-1.5 border border-slate-700 transition"
+                    title="کپی لینک مستقیم صفحه پروژکتور"
+                  >
+                    {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+                    <span>{copiedLink ? 'آدرس کپی شد!' : 'کپی لینک پروژکتور (station=projector)'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 5-Step Visual Walkthrough Cards */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-indigo-300 font-bold text-sm px-1">
+                  <Sparkles className="w-4 h-4 text-indigo-400" />
+                  <span>راهنمای گام‌به‌گام تفکیک تصویر (در کمتر از ۱ دقیقه):</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                  {/* Step 1 */}
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between space-y-2 hover:border-indigo-500/40 transition">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 flex items-center justify-center font-bold text-xs font-mono">
+                          {toPersianDigits(1)}
+                        </span>
+                        <Cable className="w-5 h-5 text-indigo-400" />
+                      </div>
+                      <h4 className="font-bold text-xs text-white">اتصال کابل تصویر</h4>
+                      <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                        کابل HDMI یا VGA ویدئو پروژکتور سالن را به خروجی تصویر لپ‌تاپ اپراتور متصل و پروژکتور را روشن کنید.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Step 2 */}
+                  <div className="bg-slate-950/60 border border-indigo-500/40 rounded-2xl p-4 flex flex-col justify-between space-y-2 hover:border-indigo-500 transition relative overflow-hidden">
+                    <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-bl-lg">
+                      کلید حیاتی
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 flex items-center justify-center font-bold text-xs font-mono">
+                          {toPersianDigits(2)}
+                        </span>
+                        <Monitor className="w-5 h-5 text-amber-400" />
+                      </div>
+                      <h4 className="font-bold text-xs text-white">کلید Win + P در ویندوز</h4>
+                      <p className="text-[11px] text-slate-300 mt-1.5 leading-relaxed">
+                        روی کیبورد کلید <kbd className="bg-slate-800 text-amber-300 font-mono px-1.5 py-0.5 rounded border border-slate-700">Win + P</kbd> را بزنید و گزینه <strong className="text-amber-300">Extend (توسعه)</strong> را انتخاب کنید.
+                      </p>
+                      <span className="block mt-1 text-[10px] text-rose-300 font-medium">
+                        ⚠️ هرگز Duplicate را نزنید!
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Step 3 */}
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between space-y-2 hover:border-indigo-500/40 transition">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 flex items-center justify-center font-bold text-xs font-mono">
+                          {toPersianDigits(3)}
+                        </span>
+                        <ExternalLink className="w-5 h-5 text-indigo-400" />
+                      </div>
+                      <h4 className="font-bold text-xs text-white">باز کردن پنجره مستقل</h4>
+                      <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                        در بالای برنامه روی دکمه «پروژکتور سالن» کلیک کرده و «باز کردن در پنجره مستقل» را انتخاب کنید.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Step 4 */}
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between space-y-2 hover:border-indigo-500/40 transition">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 flex items-center justify-center font-bold text-xs font-mono">
+                          {toPersianDigits(4)}
+                        </span>
+                        <Laptop className="w-5 h-5 text-indigo-400" />
+                      </div>
+                      <h4 className="font-bold text-xs text-white">انتقال پنجره به پرده</h4>
+                      <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                        پنجره باز شده را با ماوس از نوار بالایش بگیرید و به سمت صفحه پروژکتور (سمت راست دسکتاپ) بکشید (Drag & Drop).
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Step 5 */}
+                  <div className="bg-slate-950/60 border border-emerald-500/40 rounded-2xl p-4 flex flex-col justify-between space-y-2 hover:border-emerald-500 transition">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center justify-center font-bold text-xs font-mono">
+                          {toPersianDigits(5)}
+                        </span>
+                        <Maximize2 className="w-5 h-5 text-emerald-400" />
+                      </div>
+                      <h4 className="font-bold text-xs text-white">تمام‌صفحه با F11</h4>
+                      <p className="text-[11px] text-slate-300 mt-1.5 leading-relaxed">
+                        در پنجره پروژکتور، کلید <kbd className="bg-slate-800 text-emerald-400 font-mono px-1.5 py-0.5 rounded border border-slate-700">F11</kbd> را بزنید تا نوار مرورگر ناپدید شده و سالن فقط صفحه زنده را ببیند.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Advanced Comparison & Features */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Operator Laptop Benefits */}
+                <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
+                  <div className="flex items-center gap-2 text-indigo-300 font-bold text-sm">
+                    <ShieldCheck className="w-5 h-5 text-indigo-400" />
+                    <span>وضعیت صفحه اپراتور (روی مانیتور لپ‌تاپ):</span>
+                  </div>
+                  <ul className="text-xs text-slate-300 space-y-2 leading-relaxed">
+                    <li className="flex items-start gap-2">
+                      <span className="text-emerald-400 font-bold">✓</span>
+                      <span><strong>آزادی کامل عمل:</strong> اپراتور می‌تواند آزادانه بین تب‌های شمارش آرا، واجدین شرایط، تنظیمات و صورتجلسه جابجا شود؛ سالن اصلاً متوجه جابجایی تب‌ها نمی‌شود.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-emerald-400 font-bold">✓</span>
+                      <span><strong>محرمانگی کامل:</strong> عملیات ثبت کد ملی رأی‌دهندگان، دکمه‌های حذفی و اصلاحیه‌ها تنها روی صفحه اپراتور دیده می‌شوند و روی پرده سالن منعکس نمی‌شوند.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-emerald-400 font-bold">✓</span>
+                      <span><strong>سرعت نامحدود:</strong> اپراتور می‌تواند با کیبورد عددی (Numpad) پشت سر هم کد کاندیداها را وارد کند و در صورت اشتباه با دکمه بازگشت (Undo) آن را تصحیح کند.</span>
+                    </li>
+                  </ul>
+                </div>
+
+                {/* Projector Screen Benefits */}
+                <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3">
+                  <div className="flex items-center gap-2 text-emerald-300 font-bold text-sm">
+                    <MonitorPlay className="w-5 h-5 text-emerald-400" />
+                    <span>وضعیت صفحه پروژکتور (روی پرده تالار):</span>
+                  </div>
+                  <ul className="text-xs text-slate-300 space-y-2 leading-relaxed">
+                    <li className="flex items-start gap-2">
+                      <span className="text-emerald-400 font-bold">✓</span>
+                      <span><strong>همگام‌سازی بلادرنگ (زیر ۱۰ میلی‌ثانیه):</strong> به محض اینکه اپراتور یک رأی ثبت کند، نمودار میله‌ای و درصد رأی کاندیدا روی پرده سالن با انیمیشن زیبا بالا می‌رود.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-emerald-400 font-bold">✓</span>
+                      <span><strong>تغییر چیدمان ۱ ستونه یا ۲ ستونه:</strong> اگر تعداد کاندیداها زیاد است (مثلاً بیش از ۵ نفر)، دکمه ۲ ستونه در بالای پروژکتور وجود دارد تا تمام اسامی بدون نیاز به اسکرول روی پرده جا شوند.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-emerald-400 font-bold">✓</span>
+                      <span><strong>نمایش کرسی‌های اصلی و علی‌البدل:</strong> برندگان بر اساس تعداد کرسی‌های تعریف‌شده به تفکیک رنگی مشخص می‌شوند.</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* Alternative Method: Wi-Fi / LAN Network (No Long Cable Needed) */}
+              <div className="bg-slate-950/70 border border-blue-500/30 rounded-2xl p-4 sm:p-5 space-y-2 text-xs">
+                <div className="flex items-center gap-2 text-blue-300 font-bold text-sm">
+                  <Wifi className="w-5 h-5 text-blue-400" />
+                  <span>روش جایگزین بدون نیاز به کابل HDMI بلند (اتصال با شبکه وای‌فای یا کابل LAN):</span>
+                </div>
+                <p className="text-slate-300 leading-relaxed">
+                  اگر پروژکتور در فاصله دوری از میز اپراتور قرار دارد و کابل HDMI به آن نمی‌رسد:
+                  یک لپ‌تاپ معمولی کنار پروژکتور قرار دهید و کابل تصویر پروژکتور را به آن وصل کنید. سپس هر دو لپ‌تاپ را به یک مودم وای‌فای متصل کنید. در مرورگر لپ‌تاپ پروژکتور کافیست آدرس <code className="text-emerald-400 font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">http://[آی‌پی لپ‌تاپ اصلی]:3000/?station=projector</code> را وارد کرده و کلید <kbd className="bg-slate-800 text-amber-300 font-mono px-1.5 py-0.5 rounded">F11</kbd> را بزنید. سیستم تمام آرا را به صورت بی‌سیم و زنده همگام می‌کند!
+                </p>
               </div>
             </div>
           )}

@@ -14,7 +14,9 @@ import {
   Maximize2,
   Minimize2,
   LayoutGrid,
-  List
+  List,
+  ExternalLink,
+  Monitor
 } from 'lucide-react';
 
 interface ProjectorViewModalProps {
@@ -41,6 +43,7 @@ export const ProjectorViewModal: React.FC<ProjectorViewModalProps> = ({
   const [columnsMode, setColumnsMode] = useState<'1-col' | '2-col'>(() => 
     rankedCandidates.length > 5 ? '2-col' : '1-col'
   );
+  const isDetached = typeof window !== 'undefined' && window.location.search.includes('station=projector');
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -122,6 +125,22 @@ export const ProjectorViewModal: React.FC<ProjectorViewModalProps> = ({
             </div>
           </div>
 
+          {/* Open in Separate Window (For Hall Projector) */}
+          {!isDetached && (
+            <button
+              onClick={() => {
+                window.open('/?station=projector', '_blank');
+                onClose();
+              }}
+              className="px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-lg shadow-indigo-950/40 ring-1 ring-indigo-400/50"
+              title="پروژکتور را در پنجره جداگانه باز کنید تا به مانیتور دوم/پروژکتور بکشید و این صفحه برای ثبت رأی اپراتور آزاد شود"
+            >
+              <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="hidden sm:inline">انتقال به پنجره مجزا (پروژکتور سالن)</span>
+              <span className="sm:hidden">پنجره مجزا</span>
+            </button>
+          )}
+
           {/* Toggle 1-col / 2-col to fit more candidates */}
           <button
             onClick={() => setColumnsMode(prev => prev === '1-col' ? '2-col' : '1-col')}
@@ -136,7 +155,7 @@ export const ProjectorViewModal: React.FC<ProjectorViewModalProps> = ({
           <button
             onClick={toggleFullscreen}
             className="p-2 sm:p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
-            title={isFullscreen ? 'خروج از تمام صفحه' : 'نمایش تمام صفحه ویدئو پروژکتور'}
+            title={isFullscreen ? 'خروج از تمام صفحه' : 'نمایش تمام صفحه ویدئو پروژکتور (F11)'}
           >
             {isFullscreen ? <Minimize2 className="w-4 h-4 sm:w-5 sm:h-5" /> : <Maximize2 className="w-4 h-4 sm:w-5 sm:h-5" />}
           </button>
@@ -150,6 +169,39 @@ export const ProjectorViewModal: React.FC<ProjectorViewModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Dual Monitor & Projector Guidance Banner */}
+      {!isDetached && (
+        <div className="bg-gradient-to-r from-indigo-950/90 via-slate-900 to-indigo-950/90 border border-indigo-500/40 rounded-2xl p-3 sm:p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-indigo-200 mt-3 flex-shrink-0 shadow-md">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-indigo-500/20 text-indigo-300 rounded-xl flex-shrink-0">
+              <Monitor className="w-5 h-5" />
+            </div>
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <strong className="text-white font-bold">راهنمای تفکیک صفحه پروژکتور از لپ‌تاپ اپراتور:</strong>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-[10px] border border-emerald-500/30">
+                  اپراتور ثبت رأی می‌کند، سالن فقط پروژکتور را می‌بیند
+                </span>
+              </div>
+              <p className="text-slate-300 text-[11px] leading-relaxed">
+                کلیدهای <kbd className="bg-slate-800 text-amber-300 px-1 py-0.5 rounded font-mono">Win + P</kbd> را در ویندوز بزنید و حالت <strong className="text-indigo-300">Extend (توسعه)</strong> را انتخاب کنید. سپس دکمه «انتقال به پنجره مجزا» را بزنید؛ پنجره جدید را با ماوس به سمت تصویر پروژکتور بکشید و <kbd className="bg-slate-800 text-amber-300 px-1 py-0.5 rounded font-mono">F11</kbd> بزنید تا تمام‌صفحه شود. صفحه لپ‌تاپ برای ثبت و شمارش آرا آزاد می‌ماند!
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              window.open('/?station=projector', '_blank');
+              onClose();
+            }}
+            className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 flex-shrink-0 shadow transition self-stretch sm:self-auto justify-center"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            <span>باز کردن در پنجره مستقل</span>
+          </button>
+        </div>
+      )}
 
       {/* Main Content: Compact live ranking bars so all candidates fit comfortably */}
       <div className={`my-4 sm:my-5 max-w-7xl mx-auto w-full ${

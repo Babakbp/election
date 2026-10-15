@@ -316,6 +316,7 @@ export const VotersTab: React.FC<VotersTabProps> = ({
                 nationalIdMasked: rawNId ? maskNationalId(rawNId) : '***-****-***',
                 phoneNumber: phone || '—',
                 hasVoted: false,
+                status: 'NOT_CHECKED_IN',
               });
             }
           }
@@ -356,6 +357,7 @@ export const VotersTab: React.FC<VotersTabProps> = ({
       nationalIdMasked: cleanNId ? maskNationalId(cleanNId) : '***-***-***',
       phoneNumber: toEnglishDigits(newPhone).trim() || '—',
       hasVoted: false,
+      status: 'NOT_CHECKED_IN',
     };
 
     onUpdateVoters([...voters, newV], `ثبت دستی رأی‌دهنده جدید: ${newV.fullName}`);
@@ -873,8 +875,12 @@ export const VotersTab: React.FC<VotersTabProps> = ({
                   <td className="border border-black p-0.5 font-bold truncate max-w-[90px]">{v.fullName}</td>
                   <td className="border border-black p-0.5 text-center font-mono">{v.nationalIdMasked}</td>
                   <td className="border border-black p-0.5 text-center font-mono">{toPersianDigits(v.phoneNumber)}</td>
-                  <td className="border border-black p-0.5 text-center text-[7px] text-gray-500">
-                    {v.hasVoted ? '✓ تحویل شد' : ''}
+                  <td className="border border-black p-0.5 text-center text-[7px] text-gray-700 font-bold">
+                    {v.status === 'VOTED' || v.hasVoted
+                      ? '✓ رای داده شد'
+                      : v.status === 'BALLOT_DELIVERED' || v.ballotDeliveredAt
+                      ? '✓ تعرفه تحویل شد'
+                      : ''}
                   </td>
                 </tr>
               ))}
@@ -899,8 +905,12 @@ export const VotersTab: React.FC<VotersTabProps> = ({
                   <td className="border border-black p-0.5 font-bold truncate max-w-[90px]">{v.fullName}</td>
                   <td className="border border-black p-0.5 text-center font-mono">{v.nationalIdMasked}</td>
                   <td className="border border-black p-0.5 text-center font-mono">{toPersianDigits(v.phoneNumber)}</td>
-                  <td className="border border-black p-0.5 text-center text-[7px] text-gray-500">
-                    {v.hasVoted ? '✓ تحویل شد' : ''}
+                  <td className="border border-black p-0.5 text-center text-[7px] text-gray-700 font-bold">
+                    {v.status === 'VOTED' || v.hasVoted
+                      ? '✓ رای داده شد'
+                      : v.status === 'BALLOT_DELIVERED' || v.ballotDeliveredAt
+                      ? '✓ تعرفه تحویل شد'
+                      : ''}
                   </td>
                 </tr>
               ))}

@@ -397,12 +397,12 @@ export const NetworkHubModal: React.FC<NetworkHubModalProps> = ({
                 </p>
 
                 {/* Direct Link Input */}
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
                   <input
                     type="text"
                     readOnly
                     value={getStationUrl(activeTabRole)}
-                    className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-emerald-400 dir-ltr select-all focus:outline-none"
+                    className="flex-1 min-w-0 w-full sm:w-auto px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-emerald-400 dir-ltr select-all focus:outline-none"
                   />
                   <button
                     onClick={() => copyToClipboard(getStationUrl(activeTabRole))}
@@ -497,25 +497,33 @@ export const NetworkHubModal: React.FC<NetworkHubModalProps> = ({
                   </div>
                 </div>
 
-                {/* Golden Firewall Tip */}
-                <div className="bg-amber-950/30 border border-amber-500/30 p-3 rounded-xl flex items-start gap-2.5 text-xs text-amber-200">
-                  <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-                  <div className="flex-1 space-y-1">
-                    <strong>نکته حیاتی فایروال ویندوز (اگر صفحه باز نشد):</strong>
-                    <p className="text-[11px] text-amber-300/90 leading-relaxed">
-                      اگر لپ‌تاپ لمسی خطای عدم اتصال داد، فایروال لپ‌تاپ اصلی پورت ۳۰۰۰ را بسته است. در لپ‌تاپ اصلی، PowerShell را با <span className="font-bold underline">Run as administrator</span> باز کرده و دستور زیر را اجرا کنید:
-                    </p>
-                    <div className="flex items-center gap-2 bg-slate-950/80 p-2 rounded-lg border border-slate-800 font-mono text-[11px] text-slate-300">
-                      <span className="flex-1 dir-ltr truncate">
+                {/* Golden Firewall Tip (Fixed: جلوگیری از بیرون‌زدگی متن از سمت چپ) */}
+                <div dir="rtl" className="bg-amber-950/40 border border-amber-500/40 p-4 rounded-2xl text-xs text-amber-200 w-full max-w-full overflow-hidden box-border">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0" />
+                    <strong className="text-amber-300 font-bold text-xs sm:text-sm">
+                      نکته حیاتی فایروال ویندوز (اگر صفحه باز نشد):
+                    </strong>
+                  </div>
+                  
+                  <p className="text-[11px] text-amber-200/90 leading-relaxed mb-2.5 break-words">
+                    اگر لپ‌تاپ لمسی خطای عدم اتصال داد، فایروال لپ‌تاپ اصلی پورت ۳۰۰۰ را بسته است. در لپ‌تاپ اصلی، PowerShell یا CMD را با <span className="font-bold underline text-amber-100">Run as administrator</span> باز کرده و دستور زیر را اجرا فرمایید:
+                  </p>
+                  
+                  <div className="bg-slate-950/90 p-2.5 rounded-xl border border-slate-800 w-full max-w-full space-y-2 box-border overflow-hidden">
+                    <div dir="ltr" className="w-full bg-slate-900/90 py-2 px-3 rounded-lg border border-slate-800/80 text-left overflow-x-auto">
+                      <code className="text-[11px] font-mono text-emerald-300 block select-all whitespace-normal break-all">
                         netsh advfirewall firewall add rule name="ElectionSystem" dir=in action=allow protocol=TCP localport=3000
-                      </span>
+                      </code>
+                    </div>
+                    <div className="flex justify-end">
                       <button
                         type="button"
                         onClick={() => copyToClipboard('netsh advfirewall firewall add rule name="ElectionSystem" dir=in action=allow protocol=TCP localport=3000')}
-                        className="px-2 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded font-bold flex items-center gap-1 text-[10px]"
+                        className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg flex items-center justify-center gap-1.5 text-xs transition shadow-sm active:scale-95"
                       >
-                        <Copy className="w-3 h-3" />
-                        <span>کپی دستور</span>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>کپی دستور فایروال</span>
                       </button>
                     </div>
                   </div>
