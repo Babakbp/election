@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Voter, Operator, VoterStatus } from '../types/election';
-import { toPersianDigits, toEnglishDigits, maskNationalId, formatJalali } from '../utils/persian';
+import { Voter, Operator, VoterStatus, ElectionSession } from '../types/election';
+import { toPersianDigits, toEnglishDigits, maskNationalId, formatJalali, parseJalaliBirthDate, isVoterAgeEligible } from '../utils/persian';
 import { exportVotersTemplateToExcel, exportVotersListToExcel } from '../utils/export';
 import { audioFeedback } from '../utils/audioFeedback';
 import { 
@@ -27,11 +27,14 @@ import {
   X,
   Fingerprint,
   Trash2,
-  FileCheck
+  FileCheck,
+  Calendar,
+  Shield
 } from 'lucide-react';
 
 interface VotersTabProps {
   voters: Voter[];
+  session?: ElectionSession;
   isLocked: boolean;
   currentOperator: Operator;
   onUpdateVoters: (newVoters: Voter[], reason: string) => void;
@@ -43,6 +46,7 @@ interface VotersTabProps {
 
 export const VotersTab: React.FC<VotersTabProps> = ({
   voters,
+  session,
   isLocked,
   onUpdateVoters,
   onToggleVoterStatus,
@@ -58,6 +62,7 @@ export const VotersTab: React.FC<VotersTabProps> = ({
   const [newName, setNewName] = useState('');
   const [newNationalId, setNewNationalId] = useState('');
   const [newPhone, setNewPhone] = useState('');
+  const [newBirthDate, setNewBirthDate] = useState('');
   const [addError, setAddError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -75,6 +80,7 @@ export const VotersTab: React.FC<VotersTabProps> = ({
   const [quickNId, setQuickNId] = useState('');
   const [quickFullName, setQuickFullName] = useState('');
   const [quickPhone, setQuickPhone] = useState('');
+  const [quickBirthDate, setQuickBirthDate] = useState('');
   const [quickError, setQuickError] = useState('');
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
@@ -150,6 +156,14 @@ export const VotersTab: React.FC<VotersTabProps> = ({
           message: `⚠️ توجه: تعرفه رأی برای «${found.fullName}» قبلاً در ساعت ${toPersianDigits(found.ballotDeliveredAt || '')} تحویل شده است و در انتظار ثبت رأی می‌باشد.`,
           timestamp: formatJalali(new Date(), true),
         });
+      } else if (session?.hasAgeRestriction && found.isAgeEligible === false) {
+        audioFeedback.playNotFoundWarning();
+        setScanResult({
+          type: 'ERROR',
+          voter: found,
+          message: `⚠️ هشدار عدم احراز رده سنی! رأی‌دهنده «${found.fullName}» (${found.age ? `سن: ${toPersianDigits(found.age)} سال` : 'فاقد تاریخ تولد'}) شرط سنی مصوب حوزه (حداقل ${toPersianDigits(session.minAge || 18)} سال) را احراز نکرده است. تحویل تعرفه مجاز نمی‌باشد.`,
+          timestamp: formatJalali(new Date(), true),
+        });
       } else {
         // SUCCESS CHECK-IN & ISSUE BALLOT
         audioFeedback.playScanSuccess();
@@ -173,11 +187,12 @@ export const VotersTab: React.FC<VotersTabProps> = ({
       setQuickNId(cleanNId);
       setQuickFullName('');
       setQuickPhone('');
+      setQuickBirthDate('');
       setQuickError('');
       setIsQuickRegisterOpen(true);
       setScanResult({
         type: 'NOT_FOUND',
-        message: `کد ملی ${toPersianDigits(cleanNId)} در فهرست واجدین شرایط (اکسل) ثبت نشده است. لطفاً نام رأی‌دهنده را وارد کنید تا فوراً ثبت و تعرفه تحویل گردد.`,
+        message: `کد ملی ${toPersianDigits(cleanNId)} در فهرست واجدین شرایط (اکسل) ثبت نشده است. لطفاً مشخصات رأی‌دهنده را وارد کنید تا ثبت و تعرفه تحویل گردد.`,
         timestamp: formatJalali(new Date(), true),
       });
       setBarcodeInput('');
@@ -198,6 +213,23 @@ export const VotersTab: React.FC<VotersTabProps> = ({
       return;
     }
 
+    let birthDate: string | undefined = undefined;
+    let age: number | undefined = undefined;
+    if (quickBirthDate.trim()) {
+      const parsed = parseJalaliBirthDate(quickBirthDate);
+      if (parsed && parsed.isValid) {
+        birthDate = parsed.formattedBirthDate;
+        age = parsed.age;
+      }
+    }
+    const eligibility = isVoterAgeEligible(birthDate, session?.hasAgeRestriction, session?.minAge, session?.maxAge);
+
+    if (session?.hasAgeRestriction && !eligibility.isEligible) {
+      if (!confirm(`⚠️ توجه: این فرد بر اساس تاریخ تولد وارد شده، شرط رده سنی را احراز نکرده است (${eligibility.reason || 'خارج از رده سنی'}). آیا با مسئولیت خود مایل به صدور تعرفه هستید؟`)) {
+        return;
+      }
+    }
+
     const timeNow = formatJalali(new Date(), true);
     const newVoter: Voter = {
       id: `VOT-SCAN-${Date.now()}`,
@@ -206,6 +238,9 @@ export const VotersTab: React.FC<VotersTabProps> = ({
       nationalId: quickNId,
       nationalIdMasked: maskNationalId(quickNId),
       phoneNumber: toEnglishDigits(quickPhone).trim() || '—',
+      birthDate,
+      age: age ?? eligibility.age,
+      isAgeEligible: eligibility.isEligible,
       hasVoted: false,
       status: 'BALLOT_DELIVERED',
       ballotDeliveredAt: timeNow,
@@ -268,7 +303,7 @@ export const VotersTab: React.FC<VotersTabProps> = ({
     exportVotersListToExcel(voters, '۱');
   };
 
-  // Import .xlsx or .xls or .csv File
+  // Import .xlsx or .xls or .csv File (Requested: در اکسل ورودی تاریخ تولد شمسی نیز لحاظ شود)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -287,44 +322,102 @@ export const VotersTab: React.FC<VotersTabProps> = ({
           return;
         }
 
+        // Detect column positions from header row
+        const headerRow = (rows[0] || []).map((h) => String(h || '').trim());
+        let nameCol = -1;
+        let nIdCol = -1;
+        let phoneCol = -1;
+        let birthDateCol = -1;
+
+        headerRow.forEach((colRaw, idx) => {
+          const col = colRaw.toLowerCase();
+          if (col.includes('نام') || col.includes('name')) {
+            nameCol = idx;
+          } else if (col.includes('ملی') || col.includes('national') || col.includes('nid')) {
+            nIdCol = idx;
+          } else if (col.includes('تماس') || col.includes('تلفن') || col.includes('همراه') || col.includes('phone') || col.includes('mobile')) {
+            phoneCol = idx;
+          } else if (col.includes('تولد') || col.includes('birth') || col.includes('سن') || col.includes('سال تولد')) {
+            birthDateCol = idx;
+          }
+        });
+
         const newVoterList: Voter[] = [];
         // Skip header row
         for (let i = 1; i < rows.length; i++) {
           const row = rows[i];
-          if (row && row.length > 0) {
-            let fullName = '';
-            let rawNId = '';
-            let phone = '';
+          if (!row || row.length === 0) continue;
 
-            // Detect whether column 0 is row number or name
-            if (typeof row[0] === 'number' || (/^\d+$/.test(String(row[0]).trim()) && String(row[0]).trim().length < 6)) {
+          let fullName = '';
+          let rawNId = '';
+          let phone = '';
+          let rawBirthDate = '';
+
+          if (nameCol !== -1) {
+            fullName = String(row[nameCol] || '').trim();
+            rawNId = nIdCol !== -1 ? toEnglishDigits(String(row[nIdCol] || '')).trim() : '';
+            phone = phoneCol !== -1 ? toEnglishDigits(String(row[phoneCol] || '')).trim() : '';
+            rawBirthDate = birthDateCol !== -1 ? String(row[birthDateCol] || '').trim() : '';
+          } else {
+            // Positional fallback
+            const hasLeadingIndex = typeof row[0] === 'number' || (/^\d+$/.test(String(row[0]).trim()) && String(row[0]).trim().length < 6);
+            if (hasLeadingIndex) {
               fullName = String(row[1] || '').trim();
               rawNId = toEnglishDigits(String(row[2] || '')).trim();
               phone = toEnglishDigits(String(row[3] || '')).trim();
+              rawBirthDate = String(row[4] || '').trim();
             } else {
               fullName = String(row[0] || '').trim();
               rawNId = toEnglishDigits(String(row[1] || '')).trim();
               phone = toEnglishDigits(String(row[2] || '')).trim();
+              rawBirthDate = String(row[3] || '').trim();
+            }
+          }
+
+          if (fullName) {
+            let birthDate: string | undefined = undefined;
+            let age: number | undefined = undefined;
+
+            if (rawBirthDate) {
+              const parsed = parseJalaliBirthDate(rawBirthDate);
+              if (parsed && parsed.isValid) {
+                birthDate = parsed.formattedBirthDate;
+                age = parsed.age;
+              }
             }
 
-            if (fullName) {
-              newVoterList.push({
-                id: `VOT-${Date.now()}-${newVoterList.length + 1}`,
-                rowNumber: newVoterList.length + 1,
-                fullName,
-                nationalId: rawNId || '1000000000',
-                nationalIdMasked: rawNId ? maskNationalId(rawNId) : '***-****-***',
-                phoneNumber: phone || '—',
-                hasVoted: false,
-                status: 'NOT_CHECKED_IN',
-              });
-            }
+            const eligibility = isVoterAgeEligible(
+              birthDate,
+              session?.hasAgeRestriction,
+              session?.minAge,
+              session?.maxAge
+            );
+
+            newVoterList.push({
+              id: `VOT-${Date.now()}-${newVoterList.length + 1}`,
+              rowNumber: newVoterList.length + 1,
+              fullName,
+              nationalId: rawNId || '1000000000',
+              nationalIdMasked: rawNId ? maskNationalId(rawNId) : '***-****-***',
+              phoneNumber: phone || '—',
+              birthDate,
+              age: age ?? eligibility.age,
+              isAgeEligible: eligibility.isEligible,
+              hasVoted: false,
+              status: 'NOT_CHECKED_IN',
+            });
           }
         }
 
         if (newVoterList.length > 0) {
-          onUpdateVoters(newVoterList, `بارگذاری ${toPersianDigits(newVoterList.length)} نفر واجد شرایط از فایل اکسل .xlsx`);
-          alert(`تعداد ${toPersianDigits(newVoterList.length)} نفر رأی‌دهنده با موفقیت از فایل .xlsx وارد شدند.`);
+          const ineligibleCount = newVoterList.filter((v) => v.isAgeEligible === false).length;
+          onUpdateVoters(newVoterList, `بارگذاری ${toPersianDigits(newVoterList.length)} نفر واجد شرایط از فایل اکسل همراه با تاریخ تولد شمسی`);
+          
+          let alertMsg = `تعداد ${toPersianDigits(newVoterList.length)} نفر رأی‌دهنده با موفقیت از فایل .xlsx وارد شدند.`;
+          if (session?.hasAgeRestriction && ineligibleCount > 0) {
+            alertMsg += `\n⚠️ توجه: تعداد ${toPersianDigits(ineligibleCount)} نفر خارج از رده سنی مصوب (حداقل ${toPersianDigits(session.minAge || 18)} سال) شناسایی و با برچسب هشدار علامت‌گذاری شدند.`;
+          }
+          alert(alertMsg);
         } else {
           alert('هیچ سطری در فایل اکسل شناسایی نشد.');
         }
@@ -349,6 +442,17 @@ export const VotersTab: React.FC<VotersTabProps> = ({
       return;
     }
 
+    let birthDate: string | undefined = undefined;
+    let age: number | undefined = undefined;
+    if (newBirthDate.trim()) {
+      const parsed = parseJalaliBirthDate(newBirthDate);
+      if (parsed && parsed.isValid) {
+        birthDate = parsed.formattedBirthDate;
+        age = parsed.age;
+      }
+    }
+    const eligibility = isVoterAgeEligible(birthDate, session?.hasAgeRestriction, session?.minAge, session?.maxAge);
+
     const newV: Voter = {
       id: `VOT-${Date.now()}`,
       rowNumber: voters.length + 1,
@@ -356,6 +460,9 @@ export const VotersTab: React.FC<VotersTabProps> = ({
       nationalId: cleanNId || '1000000000',
       nationalIdMasked: cleanNId ? maskNationalId(cleanNId) : '***-***-***',
       phoneNumber: toEnglishDigits(newPhone).trim() || '—',
+      birthDate,
+      age: age ?? eligibility.age,
+      isAgeEligible: eligibility.isEligible,
       hasVoted: false,
       status: 'NOT_CHECKED_IN',
     };
@@ -364,6 +471,7 @@ export const VotersTab: React.FC<VotersTabProps> = ({
     setNewName('');
     setNewNationalId('');
     setNewPhone('');
+    setNewBirthDate('');
     setIsAddModalOpen(false);
     setAddError('');
   };
@@ -696,6 +804,7 @@ export const VotersTab: React.FC<VotersTabProps> = ({
                 <th className="py-3 px-4">نام و نام خانوادگی</th>
                 <th className="py-3 px-4">کد ملی (محافظت‌شده)</th>
                 <th className="py-3 px-4">شماره تماس / همراه</th>
+                <th className="py-3 px-4 text-center">تاریخ تولد / سن</th>
                 <th className="py-3 px-4 text-center">وضعیت تعرفه و رأی</th>
                 <th className="py-3 px-4 text-center">اقدام منشی شعبه / عملیات</th>
               </tr>
@@ -718,6 +827,36 @@ export const VotersTab: React.FC<VotersTabProps> = ({
                     </td>
                     <td className="py-3 px-4 font-mono text-slate-300" dir="ltr">
                       {toPersianDigits(voter.phoneNumber)}
+                    </td>
+                    {/* Birth Date & Age Column */}
+                    <td className="py-3 px-4 text-center">
+                      {voter.birthDate ? (
+                        <div className="inline-flex flex-col items-center">
+                          <span className="font-mono text-slate-200 font-semibold text-[11px]">
+                            {toPersianDigits(voter.birthDate)}
+                          </span>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            {voter.age !== undefined && (
+                              <span className="text-[10px] bg-slate-900 px-1.5 py-0.5 rounded text-slate-300 font-mono border border-slate-700/80">
+                                {toPersianDigits(voter.age)} سال
+                              </span>
+                            )}
+                            {session?.hasAgeRestriction && (
+                              voter.isAgeEligible === false ? (
+                                <span className="text-[10px] bg-red-500/20 text-red-300 border border-red-500/40 px-1.5 py-0.5 rounded font-bold" title="این فرد شرط رده سنی را احراز نکرده است">
+                                  عدم احراز سن
+                                </span>
+                              ) : (
+                                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded font-bold">
+                                  واجد شرایط
+                                </span>
+                              )
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-slate-500 text-[11px]">—</span>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-center">
                       {isVoted ? (
@@ -966,6 +1105,42 @@ export const VotersTab: React.FC<VotersTabProps> = ({
                 />
               </div>
 
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">تاریخ تولد شمسی (اختیاری):</label>
+                <input
+                  type="text"
+                  value={newBirthDate}
+                  onChange={(e) => setNewBirthDate(e.target.value)}
+                  placeholder="مثال: 1370/05/12 یا 1370"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono outline-none focus:border-emerald-500"
+                />
+                {newBirthDate.trim() && (() => {
+                  const parsed = parseJalaliBirthDate(newBirthDate);
+                  if (!parsed || !parsed.isValid) {
+                    return <span className="text-[10px] text-amber-400 mt-1 block">فرمت صحیح: 1375/04/20 یا 1375</span>;
+                  }
+                  const eligibility = isVoterAgeEligible(parsed.formattedBirthDate, session?.hasAgeRestriction, session?.minAge, session?.maxAge);
+                  return (
+                    <div className="flex items-center gap-2 mt-1.5 text-[11px] flex-wrap">
+                      <span className="text-slate-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-700 font-mono">
+                        سن محاسبه‌شده: {toPersianDigits(parsed.age)} سال (متولد {toPersianDigits(parsed.birthYear)})
+                      </span>
+                      {session?.hasAgeRestriction && (
+                        eligibility.isEligible ? (
+                          <span className="text-emerald-300 font-bold bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/30">
+                            ✓ واجد شرایط سنی
+                          </span>
+                        ) : (
+                          <span className="text-red-300 font-bold bg-red-500/20 px-2 py-0.5 rounded border border-red-500/30">
+                            ⚠️ {eligibility.reason}
+                          </span>
+                        )
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+
               {addError && (
                 <p className="text-xs text-red-400 bg-red-950/40 p-2 rounded-lg border border-red-800">
                   {addError}
@@ -1054,6 +1229,22 @@ export const VotersTab: React.FC<VotersTabProps> = ({
                   placeholder="مثال: 09121112233"
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono placeholder-slate-500 outline-none focus:border-emerald-500"
                 />
+              </div>
+
+              <div>
+                <label className="block font-medium text-slate-300 mb-1">
+                  تاریخ تولد شمسی (اختیاری جهت رده سنی):
+                </label>
+                <input
+                  type="text"
+                  value={quickBirthDate}
+                  onChange={(e) => setQuickBirthDate(e.target.value)}
+                  placeholder="مثال: 1370/05/12 یا 1370"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono placeholder-slate-500 outline-none focus:border-emerald-500"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  فرمت مجاز: YYYY/MM/DD یا چهار رقم سال تولد (مثال: ۱۳۷۲)
+                </span>
               </div>
 
               {quickError && (

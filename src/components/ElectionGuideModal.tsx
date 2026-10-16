@@ -818,15 +818,15 @@ export const ElectionGuideModal: React.FC<ElectionGuideModalProps> = ({
                 </div>
               </div>
 
-              {/* Alternative Method: Wi-Fi / LAN Network (No Long Cable Needed) */}
-              <div className="bg-slate-950/70 border border-blue-500/30 rounded-2xl p-4 sm:p-5 space-y-2 text-xs">
-                <div className="flex items-center gap-2 text-blue-300 font-bold text-sm">
-                  <Wifi className="w-5 h-5 text-blue-400" />
-                  <span>روش جایگزین بدون نیاز به کابل HDMI بلند (اتصال با شبکه وای‌فای یا کابل LAN):</span>
+              {/* Single Screen Alternative: Direct Vote Registration inside Projector */}
+              <div className="bg-gradient-to-r from-emerald-950/60 via-slate-900 to-teal-950/60 border border-emerald-500/40 rounded-2xl p-4 sm:p-5 space-y-2 text-xs shadow-md">
+                <div className="flex items-center gap-2 text-emerald-300 font-bold text-sm">
+                  <Vote className="w-5 h-5 text-emerald-400" />
+                  <span>روش تک‌نمایشگر بدون دردسر دو صفحه کردن (ثبت رأی مستقیم در پایین صفحه پروژکتور):</span>
                 </div>
                 <p className="text-slate-300 leading-relaxed">
-                  اگر پروژکتور در فاصله دوری از میز اپراتور قرار دارد و کابل HDMI به آن نمی‌رسد:
-                  یک لپ‌تاپ معمولی کنار پروژکتور قرار دهید و کابل تصویر پروژکتور را به آن وصل کنید. سپس هر دو لپ‌تاپ را به یک مودم وای‌فای متصل کنید. در مرورگر لپ‌تاپ پروژکتور کافیست آدرس <code className="text-emerald-400 font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">http://[آی‌پی لپ‌تاپ اصلی]:3000/?station=projector</code> را وارد کرده و کلید <kbd className="bg-slate-800 text-amber-300 font-mono px-1.5 py-0.5 rounded">F11</kbd> را بزنید. سیستم تمام آرا را به صورت بی‌سیم و زنده همگام می‌کند!
+                  اگر به هر دلیل نمی‌خواهید یا امکان تفکیک دو مانیتور در ویندوز را ندارید، نیازی به نگرانی نیست! در همان صفحه پروژکتور سالن، دکمه <strong className="text-emerald-300">«ثبت آراء (دستی / بارکدخوان)»</strong> در پایین صفحه تعبیه شده است (کلید میانبر <kbd className="bg-slate-800 text-amber-300 font-mono px-1.5 py-0.5 rounded border border-slate-700">F2</kbd>).
+                  با زدن این دکمه، توضیحات ذیل صفحه موقتاً با یک نوار بسیار فشرده و کم‌جا جایگزین می‌شود تا اپراتور بتواند مستقیماً با اسکن بارکدخوان، تایپ شماره کاندیدا یا کلیک روی نامزدها رأی را ثبت کند و تغییرات در همان لحظه در نمودارهای سالن اعمال شود.
                 </p>
               </div>
             </div>

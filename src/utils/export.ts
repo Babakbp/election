@@ -131,18 +131,18 @@ export function exportAuditLogsToExcel(auditEvents: AuditEvent[], sessionTitle: 
  */
 export function exportVotersTemplateToExcel() {
   const wb = XLSX.utils.book_new();
-  const headers = ['ردیف', 'نام و نام خانوادگی', 'کد ملی', 'شماره تماس'];
+  const headers = ['ردیف', 'نام و نام خانوادگی', 'کد ملی', 'شماره تماس', 'تاریخ تولد شمسی'];
   const sampleRows = [
-    [1, 'محمد رضایی', '0012345678', '09121112233'],
-    [2, 'فاطمه احمدی', '0023456789', '09122223344'],
-    [3, 'علی مرادی', '0034567890', '09123334455'],
-    [4, 'زهرا حسینی', '0045678901', '09124445566'],
-    [5, 'حسین باقری', '0056789012', '09125556677'],
+    [1, 'محمد رضایی', '0012345678', '09121112233', '1370/05/12'],
+    [2, 'فاطمه احمدی', '0023456789', '09122223344', '1375/08/20'],
+    [3, 'علی مرادی', '0034567890', '09123334455', '1381/01/15'],
+    [4, 'زهرا حسینی', '0045678901', '09124445566', '1364/11/03'],
+    [5, 'حسین باقری', '0056789012', '09125556677', '1386/03/14'],
   ];
   const ws = XLSX.utils.aoa_to_sheet([headers, ...sampleRows]);
   XLSX.utils.book_append_sheet(wb, ws, 'قالب واجدین شرایط');
 
-  downloadWorkbook(wb, 'قالب_واجدین_شرایط.xlsx');
+  downloadWorkbook(wb, 'قالب_واجدین_شرایط_با_تاریخ_تولد.xlsx');
 }
 
 /**
@@ -150,7 +150,7 @@ export function exportVotersTemplateToExcel() {
  */
 export function exportVotersListToExcel(voters: Voter[], stationNumber: string) {
   const wb = XLSX.utils.book_new();
-  const headers = ['ردیف', 'نام و نام خانوادگی', 'کد ملی', 'شماره تماس', 'وضعیت', 'زمان تحویل تعرفه', 'زمان ثبت رأی'];
+  const headers = ['ردیف', 'نام و نام خانوادگی', 'کد ملی', 'شماره تماس', 'تاریخ تولد شمسی', 'سن (سال)', 'احراز رده سنی', 'وضعیت', 'زمان تحویل تعرفه', 'زمان ثبت رأی'];
   const rows = voters.map((v) => {
     let statusText = 'مراجعه نکرده';
     if (v.status === 'VOTED' || v.hasVoted) {
@@ -158,11 +158,15 @@ export function exportVotersListToExcel(voters: Voter[], stationNumber: string) 
     } else if (v.status === 'BALLOT_DELIVERED' || v.ballotDeliveredAt) {
       statusText = 'تعرفه تحویل شد';
     }
+    const ageEligibleText = v.isAgeEligible === false ? 'عدم احراز رده سنی' : 'واجد شرایط سنی';
     return [
       v.rowNumber,
       v.fullName,
       v.nationalIdMasked,
       v.phoneNumber,
+      v.birthDate ?? '—',
+      v.age !== undefined ? v.age : '—',
+      ageEligibleText,
       statusText,
       v.ballotDeliveredAt ?? '—',
       v.votedAt ?? '—',

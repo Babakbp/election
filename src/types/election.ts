@@ -97,6 +97,9 @@ export interface ElectionSession {
   invalidBallots: number; // آرای باطله غیرمجاز (خط‌خورده)
   maxVotesPerVoter?: number; // سقف تعداد انتخاب کاندیداها برای هر رأی‌دهنده (پیش‌فرض: ۱ نفر)
   hideVotedCandidatesInKiosk?: boolean; // حذف و مخفی‌سازی کاندیداهای رأی‌داده‌شده از صفحه لمسی اخذ رأی (پیش‌فرض: فعال)
+  hasAgeRestriction?: boolean; // شرط رده سنی فعال باشد یا خیر (قابل انتخاب یا عدم انتخاب در تنظیمات حوزه)
+  minAge?: number; // حداقل سن مجاز رأی‌دهی (پیش‌فرض: ۱۸ سال)
+  maxAge?: number; // حداکثر سن مجاز رأی‌دهی (اختیاری، مثلاً ۳۵ سال برای جوانان یا ۷۰ سال)
   presidingOfficer: OfficialPerson; // مسئول حوزه / رئیس شعبه
   observers: OfficialPerson[]; // ناظران و بازرسان
   status: SessionStatus;
@@ -125,6 +128,9 @@ export interface Voter {
   nationalId: string; // برای اعتبارسنجی و جستجو
   nationalIdMasked: string; // برای نمایش امن در لیست چاپی و صفحه
   phoneNumber: string; // شماره تماس / همراه
+  birthDate?: string; // تاریخ تولد شمسی (مثلاً 1370/05/12 یا سال 1370)
+  age?: number; // سن محاسبه‌شده بر اساس سال تولد شمسی
+  isAgeEligible?: boolean; // آیا در صورت فعال بودن شرط رده سنی، واجد شرایط است؟
   hasVoted: boolean;
   votedAt?: string;
   status?: VoterStatus;

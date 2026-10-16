@@ -454,6 +454,30 @@ export default function App() {
         }
       }
 
+      // 3.01 Vote Increment from Projector View or another connected station
+      if (msg.type === 'CANDIDATE_VOTE_INCREMENT' && msg.payload) {
+        const { candidateId, amount, candidateName, candidateNumber, operatorName } = msg.payload;
+        setCandidates((prev) =>
+          prev.map((c) => (c.id === candidateId ? { ...c, votes: c.votes + (amount || 1) } : c))
+        );
+        if (stationRole === 'master') {
+          audioFeedback.playVoteCast();
+          showFlash(`یک رأی جدید برای «${candidateName || 'کاندیدا'}» از صفحه پروژکتور ثبت شد.`);
+          await appendAuditEvent({
+            operatorName: operatorName || 'اپراتور ثبت سریع پروژکتور',
+            operatorRole: 'شمارشگر حضوری سالن',
+            candidateId,
+            candidateName,
+            candidateNumber,
+            actionType: 'VOTE_INCREMENT',
+            previousValue: null,
+            newValue: 'ثبت سریع از صفحه پروژکتور',
+            delta: amount || 1,
+            reason: 'ثبت رأی مستقیم دستی/بارکدخوان از نمایشگر سالن',
+          });
+        }
+      }
+
       // 3.1 Multiple Votes Cast from Touchscreen Kiosk or Mobile Phone
       if (msg.type === 'KIOSK_MULTIPLE_VOTES_CAST' && msg.payload) {
         const { candidateIds, candidates: chosenList, voterId, voteId, source, stationName } = msg.payload;
@@ -649,6 +673,16 @@ export default function App() {
     });
 
     showFlash(`رأی ${cand.name} افزایش یافت (+${toPersianDigits(amount)})`);
+
+    // Broadcast across windows / WiFi connected stations
+    syncEngine.broadcast('CANDIDATE_VOTE_INCREMENT', {
+      candidateId: cand.id,
+      amount,
+      newVotes,
+      candidateName: cand.name,
+      candidateNumber: cand.candidateNumber,
+      operatorName: currentOperator.name,
+    });
   };
 
   // Multiple Votes Cast from Touchscreen Kiosk
@@ -1460,6 +1494,8 @@ export default function App() {
             recentAuditEvents={auditEvents.slice(0, 6)}
             totalVotes={totalVotes}
             totalValidVotes={totalValidVotes}
+            onIncrementVote={handleIncrementVote}
+            isLocked={session.status === 'LOCKED_FINAL'}
           />
         </div>
       </ErrorBoundary>
@@ -1739,6 +1775,7 @@ export default function App() {
         {activeTab === 'VOTERS' && (
           <VotersTab
             voters={voters}
+            session={session}
             isLocked={session.status === 'LOCKED_FINAL'}
             currentOperator={currentOperator}
             onUpdateVoters={handleUpdateVoters}
@@ -1849,6 +1886,8 @@ export default function App() {
         recentAuditEvents={auditEvents}
         totalVotes={totalVotes}
         totalValidVotes={totalValidVotes}
+        onIncrementVote={handleIncrementVote}
+        isLocked={session.status === 'LOCKED_FINAL'}
       />
 
       {/* Backup and Restore Modal */}

@@ -56,6 +56,9 @@ export const SessionConfigTab: React.FC<SessionConfigTabProps> = ({
   const [registeredVotersCount, setRegisteredVotersCount] = useState(session.registeredVotersCount);
   const [maxVotesPerVoter, setMaxVotesPerVoter] = useState(session.maxVotesPerVoter || 1);
   const [hideVotedCandidatesInKiosk, setHideVotedCandidatesInKiosk] = useState(session.hideVotedCandidatesInKiosk !== false);
+  const [hasAgeRestriction, setHasAgeRestriction] = useState(session.hasAgeRestriction ?? false);
+  const [minAge, setMinAge] = useState<number>(session.minAge ?? 18);
+  const [maxAge, setMaxAge] = useState<number | undefined>(session.maxAge);
   const [tieBreakerRule, setTieBreakerRule] = useState<TieBreakerRule>(session.tieBreakerRule);
   const [actionReason, setActionReason] = useState('');
   const [modalStatusChange, setModalStatusChange] = useState<SessionStatus | null>(null);
@@ -155,9 +158,12 @@ export const SessionConfigTab: React.FC<SessionConfigTabProps> = ({
         registeredVotersCount: Number(registeredVotersCount) || 0,
         maxVotesPerVoter: Math.max(1, Number(maxVotesPerVoter) || 1),
         hideVotedCandidatesInKiosk,
+        hasAgeRestriction,
+        minAge: Number(minAge) || 18,
+        maxAge: maxAge ? Number(maxAge) : undefined,
         tieBreakerRule,
       },
-      'بروزرسانی مشخصات و تنظیمات عمومی جلسه انتخابات'
+      'بروزرسانی مشخصات و تنظیمات عمومی حوزه انتخابات و شرط رده سنی'
     );
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
@@ -482,6 +488,140 @@ export const SessionConfigTab: React.FC<SessionConfigTabProps> = ({
               </button>
             </div>
 
+            {/* Age Restriction Configuration (شرط رده سنی - قابل انتخاب یا عدم انتخاب) */}
+            <div className={`p-4 rounded-xl border transition-all space-y-3 ${
+              hasAgeRestriction
+                ? 'bg-amber-950/25 border-amber-500/40 shadow-inner'
+                : 'bg-slate-900/60 border-slate-800'
+            }`}>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <UserCheck className={`w-4 h-4 ${hasAgeRestriction ? 'text-amber-400' : 'text-slate-400'}`} />
+                    <span className="text-xs font-bold text-white">شرط و رده سنی مجاز رأی‌دهندگان:</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      hasAgeRestriction
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        : 'bg-slate-800 text-slate-400 border border-slate-700'
+                    }`}>
+                      {hasAgeRestriction ? 'فعال (اعمال شرط سنی)' : 'غیرفعال (بدون محدودیت سنی - همه سنین مجاز)'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    قابلیت انتخاب یا عدم انتخاب رده سنی برای رأی‌دهندگان. در صورت فعال بودن، در فایل اکسل ورودی و ثبت‌نام دستی، تاریخ تولد شمسی با این رده سنی سنجیده می‌شود.
+                  </p>
+                </div>
+
+                {/* Toggle Button */}
+                <button
+                  type="button"
+                  disabled={isLocked}
+                  onClick={() => setHasAgeRestriction(!hasAgeRestriction)}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex-shrink-0 active:scale-95 flex items-center gap-1.5 ${
+                    hasAgeRestriction
+                      ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-950/40'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                  }`}
+                >
+                  <span>{hasAgeRestriction ? 'غیرفعال‌سازی شرط سنی' : 'فعال‌سازی شرط سنی'}</span>
+                </button>
+              </div>
+
+              {/* Controls when Age Restriction is Active */}
+              {hasAgeRestriction && (
+                <div className="pt-3 border-t border-amber-500/20 space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {/* Minimum Age */}
+                    <div className="bg-slate-950/70 border border-slate-800 p-3 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-amber-300">حداقل سن مجاز (سال تمام):</label>
+                        <span className="text-xs font-black font-mono text-white bg-slate-900 px-2 py-0.5 rounded border border-slate-700">
+                          {toPersianDigits(minAge)} سال
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {[15, 18, 20, 25].map((age) => (
+                          <button
+                            key={age}
+                            type="button"
+                            disabled={isLocked}
+                            onClick={() => setMinAge(age)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                              minAge === age
+                                ? 'bg-amber-500 text-slate-950 font-bold'
+                                : 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800'
+                            }`}
+                          >
+                            {toPersianDigits(age)} {age === 18 ? 'سال (قانونی)' : 'سال'}
+                          </button>
+                        ))}
+                        <div className="flex items-center gap-1 mr-auto">
+                          <span className="text-[10px] text-slate-400">دلخواه:</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="100"
+                            disabled={isLocked}
+                            value={minAge}
+                            onChange={(e) => setMinAge(Math.max(1, parseInt(e.target.value) || 1))}
+                            className="w-16 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white text-center font-mono focus:border-amber-500 outline-none"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Maximum Age (Optional) */}
+                    <div className="bg-slate-950/70 border border-slate-800 p-3 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-slate-300">حداکثر سقف سنی (اختیاری):</label>
+                        <span className="text-xs font-black font-mono text-white bg-slate-900 px-2 py-0.5 rounded border border-slate-700">
+                          {maxAge ? `${toPersianDigits(maxAge)} سال` : 'بدون سقف'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          type="button"
+                          disabled={isLocked}
+                          onClick={() => setMaxAge(undefined)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                            !maxAge
+                              ? 'bg-amber-500 text-slate-950 font-bold'
+                              : 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800'
+                          }`}
+                        >
+                          بدون سقف
+                        </button>
+                        {[35, 50, 65, 75].map((age) => (
+                          <button
+                            key={age}
+                            type="button"
+                            disabled={isLocked}
+                            onClick={() => setMaxAge(age)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                              maxAge === age
+                                ? 'bg-amber-500 text-slate-950 font-bold'
+                                : 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800'
+                            }`}
+                          >
+                            {toPersianDigits(age)} {age === 35 ? 'سال (جوانان)' : 'سال'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Summary Box */}
+                  <div className="bg-slate-900/90 border border-amber-500/30 p-2.5 rounded-xl text-xs text-amber-200/90 flex items-center justify-between flex-wrap gap-2">
+                    <span>
+                      🎯 <strong>رده سنی مصوب:</strong> {maxAge ? `از سن ${toPersianDigits(minAge)} تا ${toPersianDigits(maxAge)} سال` : `از سن ${toPersianDigits(minAge)} سال به بالا`}
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      تاریخ تولد شمسی در ورود اکسل اعتبارسنجی می‌شود
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Tie-breaker Rule Selector */}
             <div className="p-3 bg-indigo-950/30 border border-indigo-500/30 rounded-xl space-y-2">

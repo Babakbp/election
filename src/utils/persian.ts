@@ -135,3 +135,138 @@ export async function computeSHA256(content: string): Promise<string> {
     return Math.abs(hash).toString(16).padStart(16, '0');
   }
 }
+
+/**
+ * Get current Jalali (Shamsi) Year
+ */
+export function getCurrentJalaliYear(): number {
+  try {
+    const formatter = new Intl.DateTimeFormat('fa-IR-u-ca-persian', { year: 'numeric' });
+    const parts = formatter.format(new Date());
+    const enDigits = toEnglishDigits(parts).replace(/\D/g, '');
+    const yr = parseInt(enDigits, 10);
+    return isNaN(yr) || yr < 1300 ? 1403 : yr;
+  } catch {
+    return 1403;
+  }
+}
+
+export interface ParsedJalaliBirthDate {
+  formattedBirthDate: string;
+  birthYear: number;
+  age: number;
+  isValid: boolean;
+}
+
+/**
+ * Parses a Shamsi birth date or year (e.g., "1370/05/12", "1370-5-12", "1370", "70/05/12")
+ * and computes the person's age based on the current Jalali calendar year.
+ */
+export function parseJalaliBirthDate(input: string | number | undefined | null): ParsedJalaliBirthDate | null {
+  if (input === undefined || input === null) return null;
+  const rawStr = toEnglishDigits(String(input)).trim();
+  if (!rawStr) return null;
+
+  const currentYear = getCurrentJalaliYear();
+
+  // Pattern 1: standard Full date YYYY/MM/DD or YYYY-MM-DD or YYYY.MM.DD
+  const fullDateMatch = rawStr.match(/^(\d{2,4})[./-](\d{1,2})[./-](\d{1,2})$/);
+  if (fullDateMatch) {
+    let year = parseInt(fullDateMatch[1], 10);
+    if (year < 100) {
+      year = year >= 0 && year <= 30 ? 1400 + year : 1300 + year;
+    }
+    const month = parseInt(fullDateMatch[2], 10);
+    const day = parseInt(fullDateMatch[3], 10);
+
+    if (year >= 1300 && year <= currentYear + 1) {
+      const padM = String(month).padStart(2, '0');
+      const padD = String(day).padStart(2, '0');
+      const age = Math.max(0, currentYear - year);
+      return {
+        formattedBirthDate: `${year}/${padM}/${padD}`,
+        birthYear: year,
+        age,
+        isValid: true,
+      };
+    }
+  }
+
+  // Pattern 2: Year only YYYY (e.g. 1375)
+  const yearOnlyMatch = rawStr.match(/^(\d{4})$/);
+  if (yearOnlyMatch) {
+    const year = parseInt(yearOnlyMatch[1], 10);
+    if (year >= 1300 && year <= currentYear + 1) {
+      const age = Math.max(0, currentYear - year);
+      return {
+        formattedBirthDate: `${year}`,
+        birthYear: year,
+        age,
+        isValid: true,
+      };
+    }
+  }
+
+  // Pattern 3: Embedded numbers in string (e.g. "متولد 1375" or "1370/02")
+  const embeddedYear = rawStr.match(/\b(13\d{2}|14\d{2})\b/);
+  if (embeddedYear) {
+    const year = parseInt(embeddedYear[1], 10);
+    if (year >= 1300 && year <= currentYear + 1) {
+      const age = Math.max(0, currentYear - year);
+      return {
+        formattedBirthDate: `${year}`,
+        birthYear: year,
+        age,
+        isValid: true,
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Checks whether a voter meets the age restriction configured for the election session
+ */
+export function isVoterAgeEligible(
+  birthDate: string | undefined | null,
+  hasAgeRestriction?: boolean,
+  minAge = 18,
+  maxAge?: number
+): { isEligible: boolean; age?: number; reason?: string } {
+  // If age restriction is turned off, everyone is eligible
+  if (!hasAgeRestriction) {
+    const parsed = parseJalaliBirthDate(birthDate);
+    return { isEligible: true, age: parsed?.age };
+  }
+
+  const parsed = parseJalaliBirthDate(birthDate);
+  if (!parsed || !parsed.isValid) {
+    return {
+      isEligible: false,
+      reason: 'تاریخ تولد ثبت نشده یا نامعتبر است',
+    };
+  }
+
+  const effectiveMin = minAge ?? 18;
+  if (parsed.age < effectiveMin) {
+    return {
+      isEligible: false,
+      age: parsed.age,
+      reason: `عدم احراز رده سنی (سن: ${parsed.age} سال - حداقل مجاز: ${effectiveMin} سال)`,
+    };
+  }
+
+  if (maxAge && parsed.age > maxAge) {
+    return {
+      isEligible: false,
+      age: parsed.age,
+      reason: `عدم احراز رده سنی (سن: ${parsed.age} سال - سقف مجاز: ${maxAge} سال)`,
+    };
+  }
+
+  return {
+    isEligible: true,
+    age: parsed.age,
+  };
+}
