@@ -50,18 +50,38 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [animatingCandId, setAnimatingCandId] = useState<string | null>(null);
-  const [lastBarcodeScanned, setLastBarcodeScanned] = useState<{
+  const [lastVotedCandidate, setLastVotedCandidate] = useState<{
     candidate: Candidate;
+    votes: number;
+    delta: number;
     timestamp: string;
   } | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const voteButtonRef = useRef<HTMLButtonElement>(null);
+  const lastVoteTimestampRef = useRef<number>(0);
 
   const isLocked = session.status === 'LOCKED_FINAL';
 
   const handleIncrement = (candidateId: string, amount: number) => {
     if (isLocked) return;
+    const now = Date.now();
+    // Guard against rapid duplicate firing (e.g. barcode scanner CR+LF or double enter within 600ms)
+    if (amount === 1 && now - lastVoteTimestampRef.current < 600) {
+      return;
+    }
+    lastVoteTimestampRef.current = now;
+
+    const targetCand = rankedCandidates.find((c) => c.id === candidateId);
+    if (targetCand) {
+      setLastVotedCandidate({
+        candidate: targetCand,
+        votes: targetCand.votes + amount,
+        delta: amount,
+        timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      });
+    }
+
     audioFeedback.playVoteIncrement();
     setAnimatingCandId(candidateId);
     setTimeout(() => setAnimatingCandId(null), 400);
@@ -93,10 +113,6 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
 
     if (target) {
       handleIncrement(target.id, 1);
-      setLastBarcodeScanned({
-        candidate: { ...target, votes: target.votes + 1 },
-        timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      });
       setSearchQuery('');
       setTimeout(() => {
         searchInputRef.current?.focus();
@@ -363,42 +379,50 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
           </div>
         </div>
 
-        {/* Last Barcode Scan Success Alert */}
-        {lastBarcodeScanned && (
-          <div className="p-3 bg-gradient-to-r from-emerald-950/90 via-slate-900 to-emerald-950/90 border-2 border-emerald-500/80 rounded-2xl flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-1 text-slate-100 shadow-xl">
-            <div className="flex items-center gap-3">
-              <img
-                src={lastBarcodeScanned.candidate.avatarUrl}
-                alt={lastBarcodeScanned.candidate.name}
-                className="w-10 h-10 rounded-xl object-cover border-2 border-emerald-400 shadow-md"
-              />
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-black text-white text-sm">
-                    {lastBarcodeScanned.candidate.name}
-                  </span>
-                  <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 font-mono text-[10px] rounded-lg font-bold">
-                    کد {toPersianDigits(lastBarcodeScanned.candidate.candidateNumber)}
-                  </span>
-                  <span className="text-emerald-400 font-bold text-xs">
-                    ✓ ۱ رأی با موفقیت ثبت شد
-                  </span>
-                </div>
-                <div className="text-[11px] text-slate-400 mt-0.5">
-                  مجموع آرای نامزد: <strong className="text-emerald-400 font-mono text-xs">{toPersianDigits(lastBarcodeScanned.candidate.votes)}</strong> رأی • زمان اسکن: {lastBarcodeScanned.timestamp}
+        {/* Dedicated Candidate Registered Card (Reserved Height - Never Shifts Page) */}
+        <div className="min-h-[68px] rounded-xl bg-slate-950/80 border border-slate-700/80 p-2 sm:px-3 flex items-center justify-between transition-all duration-300">
+          {lastVotedCandidate ? (
+            <div className="flex items-center justify-between w-full animate-in fade-in">
+              <div className="flex items-center gap-3">
+                <img
+                  src={lastVotedCandidate.candidate.avatarUrl}
+                  alt={lastVotedCandidate.candidate.name}
+                  className="w-12 h-12 rounded-xl object-cover border-2 border-emerald-400 shadow-md flex-shrink-0"
+                />
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-black text-white text-sm sm:text-base">
+                      {lastVotedCandidate.candidate.name}
+                    </span>
+                    <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 font-mono text-[11px] rounded-lg font-bold border border-amber-500/40">
+                      کد {toPersianDigits(lastVotedCandidate.candidate.candidateNumber)}
+                    </span>
+                    <span className="text-emerald-400 font-bold text-xs flex items-center gap-1 bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-500/30">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>{lastVotedCandidate.delta > 1 ? `+${toPersianDigits(lastVotedCandidate.delta)} رأی` : '۱ رأی'} با موفقیت ثبت شد</span>
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
+                    <span>مجموع آرای نامزد: <strong className="text-emerald-400 font-mono font-bold text-xs">{toPersianDigits(lastVotedCandidate.votes)}</strong> رأی</span>
+                    <span>•</span>
+                    <span>وابستگی: <span className="text-slate-300">{lastVotedCandidate.candidate.affiliation}</span></span>
+                    <span>•</span>
+                    <span>زمان ثبت: <span className="font-mono text-slate-300">{lastVotedCandidate.timestamp}</span></span>
+                  </div>
                 </div>
               </div>
+              <div className="hidden md:flex items-center gap-1.5 text-[11px] font-mono text-emerald-300 bg-emerald-950/60 px-2.5 py-1.5 rounded-lg border border-emerald-500/40">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                <span>آخرین رأی ثبت‌شده</span>
+              </div>
             </div>
-
-            <button
-              type="button"
-              onClick={() => setLastBarcodeScanned(null)}
-              className="text-slate-400 hover:text-white p-1"
-            >
-              ×
-            </button>
-          </div>
-        )}
+          ) : (
+            <div className="flex items-center gap-2.5 text-xs text-slate-400 py-1">
+              <Barcode className="w-5 h-5 text-emerald-400/80 animate-pulse flex-shrink-0" />
+              <span>کادر تأیید هویت و مشخصات نامزد: به محض اسکن تعرفه یا ثبت رأی، تصویر و مشخصات نامزد مربوطه بدون جابجایی صفحه در این کادر نمایش داده می‌شود.</span>
+            </div>
+          )}
+        </div>
 
         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
           {/* Main fast search / barcode input */}
@@ -442,7 +466,6 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
                 type="button"
                 disabled={isLocked}
                 onClick={() => executeQuickVote(matchedCandidate)}
-                onKeyDown={handleVoteButtonKeyDown}
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 focus:ring-4 focus:ring-emerald-400/50 focus:bg-emerald-500 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-950/60 transition"
                 title="ثبت رأی +۱ و بازگشت خودکار به جستجو"
               >
@@ -512,8 +535,8 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
         )}
       </div>
 
-      {/* Candidates Counting Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Candidates Counting Cards Grid - Compact Layout with Smaller Buttons */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-3">
         {filteredCandidates.map((candidate) => {
           const rankInfo = getRankBadge(candidate.rank);
           const isAnimating = animatingCandId === candidate.id;
@@ -521,39 +544,39 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
           return (
             <div
               key={candidate.id}
-              className={`bg-slate-800/90 border rounded-2xl p-5 shadow-lg relative transition-all duration-200 ${
+              className={`bg-slate-800/90 border rounded-xl p-3 sm:p-3.5 shadow-md relative transition-all duration-200 ${
                 isAnimating ? 'ring-2 ring-emerald-400 scale-[1.01] bg-slate-800' : 'border-slate-700/80 hover:border-slate-600'
               }`}
             >
               {/* Card Top: Rank & Candidate Code */}
-              <div className="flex items-center justify-between mb-3">
-                <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs font-bold ${rankInfo.bg}`}>
+              <div className="flex items-center justify-between mb-2">
+                <div className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[11px] font-bold ${rankInfo.bg}`}>
                   {rankInfo.icon}
                   <span>{rankInfo.title}</span>
                 </div>
-                <div className="flex items-center gap-1 text-xs">
-                  <span className="text-slate-400">کد نامزدی:</span>
-                  <span className="font-mono font-bold text-amber-300 bg-slate-900/90 border border-slate-700/60 px-2 py-0.5 rounded-lg">
+                <div className="flex items-center gap-1 text-[11px]">
+                  <span className="text-slate-400">کد:</span>
+                  <span className="font-mono font-bold text-amber-300 bg-slate-900/90 border border-slate-700/60 px-1.5 py-0.2 rounded">
                     {toPersianDigits(candidate.candidateNumber)}
                   </span>
                 </div>
               </div>
 
               {/* Candidate Info */}
-              <div className="flex items-start gap-3 mb-4">
+              <div className="flex items-center gap-2.5 mb-2.5">
                 <img
                   src={candidate.avatarUrl}
                   alt={candidate.name}
-                  className="w-14 h-14 rounded-2xl object-cover border-2 border-slate-600 shadow-md flex-shrink-0"
+                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl object-cover border border-slate-600 shadow-sm flex-shrink-0"
                 />
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-bold text-base text-white truncate" title={candidate.name}>
+                  <h3 className="font-bold text-sm text-white truncate" title={candidate.name}>
                     {candidate.name}
                   </h3>
-                  <p className="text-xs text-slate-400 truncate mt-0.5" title={candidate.affiliation}>
+                  <p className="text-[11px] text-slate-400 truncate mt-0.5" title={candidate.affiliation}>
                     {candidate.affiliation}
                   </p>
-                  <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-2">
+                  <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1.5 truncate">
                     <span>کد ملی: {candidate.nationalIdMasked}</span>
                     <span>•</span>
                     <span>متولد {toPersianDigits(candidate.birthYear)}</span>
@@ -563,78 +586,73 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
 
               {/* Tie-breaker Alert Indicator if candidate is tied with someone */}
               {candidate.isTied && (
-                <div className="mb-3 p-2 bg-indigo-950/40 border border-indigo-500/30 rounded-xl text-[11px] text-indigo-300 flex items-center gap-1.5">
-                  <Scale className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
+                <div className="mb-2 p-1.5 bg-indigo-950/40 border border-indigo-500/30 rounded-lg text-[10px] text-indigo-300 flex items-center gap-1">
+                  <Scale className="w-3 h-3 text-indigo-400 flex-shrink-0" />
                   <span className="truncate">{candidate.tieBreakerAppliedReason}</span>
                 </div>
               )}
 
               {/* Vote Count & Progress Bar */}
-              <div className="bg-slate-900/80 rounded-xl p-3 border border-slate-800/80 mb-4">
+              <div className="bg-slate-900/90 rounded-xl p-2 sm:p-2.5 border border-slate-800/80 mb-2.5">
                 <div className="flex items-baseline justify-between">
-                  <span className="text-xs text-slate-400">تعداد آرای مأخوذه:</span>
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="text-3xl font-black text-white font-mono tracking-tight">
+                  <span className="text-[11px] text-slate-400">آرای مأخوذه:</span>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-xl sm:text-2xl font-black text-white font-mono tracking-tight">
                       {toPersianDigits(candidate.votes)}
                     </span>
-                    <span className="text-xs text-slate-400">رأی</span>
+                    <span className="text-[11px] text-slate-400">رأی</span>
+                    <span className="text-emerald-400 font-bold font-mono text-xs mr-1">
+                      ({toPersianDigits(candidate.percentage)}٪)
+                    </span>
                   </div>
                 </div>
 
                 {/* Progress bar */}
-                <div className="mt-2">
-                  <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
-                    <div
-                      className="bg-gradient-to-l from-emerald-400 to-teal-500 h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${Math.min(100, candidate.percentage)}%` }}
-                    />
-                  </div>
-                  <div className="mt-1 flex justify-between text-[10px] text-slate-400">
-                    <span>سهم از کل آرای صحیح</span>
-                    <span className="text-emerald-400 font-bold font-mono">
-                      {toPersianDigits(candidate.percentage)}٪
-                    </span>
-                  </div>
+                <div className="mt-1.5 w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="bg-gradient-to-l from-emerald-400 to-teal-500 h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${Math.min(100, candidate.percentage)}%` }}
+                  />
                 </div>
               </div>
 
-              {/* In-Person Ballot Actions: Prominently separated increment and decrement */}
+              {/* In-Person Ballot Actions: Smaller, compact buttons */}
               {!isLocked ? (
-                <div className="space-y-2">
-                  {/* Primary Increment Buttons (Green & prominent) */}
-                  <div className="grid grid-cols-3 gap-2">
+                <div className="space-y-1.5">
+                  {/* Primary Increment Buttons (Compact) */}
+                  <div className="grid grid-cols-3 gap-1.5">
                     <button
                       type="button"
                       onClick={() => handleIncrement(candidate.id, 1)}
-                      className="col-span-2 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-xl shadow-lg shadow-emerald-900/30 transition flex items-center justify-center gap-1.5 text-sm"
+                      className="col-span-2 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-lg shadow-sm transition flex items-center justify-center gap-1 text-xs"
                     >
-                      <Plus className="w-4 h-4" />
+                      <Plus className="w-3.5 h-3.5" />
                       <span>ثبت رأی (+۱)</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => handleIncrement(candidate.id, 5)}
-                      className="py-2.5 px-2 bg-emerald-700/60 hover:bg-emerald-600/80 active:scale-95 text-emerald-100 font-bold rounded-xl border border-emerald-600/40 transition flex items-center justify-center gap-1 text-xs"
+                      className="py-1.5 px-1 bg-emerald-700/60 hover:bg-emerald-600/80 active:scale-95 text-emerald-100 font-bold rounded-lg border border-emerald-600/40 transition flex items-center justify-center gap-0.5 text-[11px]"
                       title="ثبت بسته ۵ تایی تعرفه"
                     >
                       <span>+۵ رأی</span>
                     </button>
                   </div>
 
-                  {/* Decrement / Correction Button (Red/Amber, distinct, requires modal & justification) */}
+                  {/* Decrement / Correction Button */}
                   <button
                     type="button"
                     onClick={() => onRequestCorrection(candidate)}
                     disabled={candidate.votes <= 0}
-                    className="w-full py-1.5 px-3 bg-red-950/40 hover:bg-red-900/60 active:scale-95 disabled:opacity-30 disabled:pointer-events-none text-red-300 hover:text-white border border-red-800/40 rounded-xl transition flex items-center justify-center gap-1 text-xs"
+                    className="w-full py-1 px-2 bg-red-950/30 hover:bg-red-900/50 active:scale-95 disabled:opacity-30 disabled:pointer-events-none text-red-300 hover:text-white border border-red-800/40 rounded-lg transition flex items-center justify-center gap-1 text-[11px]"
                   >
-                    <Minus className="w-3.5 h-3.5" />
-                    <span>اصلاح یا کاهش آرا (نیاز به ثبت علت)</span>
+                    <Minus className="w-3 h-3" />
+                    <span>اصلاح / کاهش آرا</span>
                   </button>
                 </div>
               ) : (
-                <div className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800 text-center text-xs text-slate-400 flex items-center justify-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5 text-purple-400" />
+                <div className="p-1.5 bg-slate-900/90 rounded-lg border border-slate-800 text-center text-[11px] text-slate-400 flex items-center justify-center gap-1">
+                  <Lock className="w-3 h-3 text-purple-400" />
                   <span>شمارش در این شعبه بسته و قفل شده است</span>
                 </div>
               )}

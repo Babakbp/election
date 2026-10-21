@@ -18,6 +18,8 @@ export type ElectionType =
   | 'PARLIAMENT'        // انتخابات پارلمانی / سراسری
   | 'SYNDICATE';        // سندیکا و کانون‌های تخصصی
 
+export type ElectedRole = 'PRINCIPAL' | 'ALTERNATE' | 'NONE'; // عضو اصلی | عضو علی‌البدل | عدم انتخاب
+
 export interface Candidate {
   id: string;
   candidateNumber: string; // کد انتخاباتی
@@ -31,6 +33,7 @@ export interface Candidate {
   registrationOrder: number;
   bio: string;
   status: 'APPROVED' | 'PENDING' | 'REJECTED';
+  electedRole?: ElectedRole;
 }
 
 export type ActionType = 
@@ -97,9 +100,11 @@ export interface ElectionSession {
   invalidBallots: number; // آرای باطله غیرمجاز (خط‌خورده)
   maxVotesPerVoter?: number; // سقف تعداد انتخاب کاندیداها برای هر رأی‌دهنده (پیش‌فرض: ۱ نفر)
   hideVotedCandidatesInKiosk?: boolean; // حذف و مخفی‌سازی کاندیداهای رأی‌داده‌شده از صفحه لمسی اخذ رأی (پیش‌فرض: فعال)
-  hasAgeRestriction?: boolean; // شرط رده سنی فعال باشد یا خیر (قابل انتخاب یا عدم انتخاب در تنظیمات حوزه)
+  hasAgeRestriction?: boolean; // شرط رده سنی فعال باشد یا خیر (اگر false باشد یعنی «سن ملاک نیست»)
+  minBirthDate?: string; // کمترین تاریخ تولد مجاز (شمسی، مثلاً 1330/01/01 یا 1330)
+  maxBirthDate?: string; // بیشترین تاریخ تولد مجاز (شمسی، مثلاً 1387/07/26 یا 1387)
   minAge?: number; // حداقل سن مجاز رأی‌دهی (پیش‌فرض: ۱۸ سال)
-  maxAge?: number; // حداکثر سن مجاز رأی‌دهی (اختیاری، مثلاً ۳۵ سال برای جوانان یا ۷۰ سال)
+  maxAge?: number; // حداکثر سن مجاز رأی‌دهی (اختیاری)
   presidingOfficer: OfficialPerson; // مسئول حوزه / رئیس شعبه
   observers: OfficialPerson[]; // ناظران و بازرسان
   status: SessionStatus;
@@ -108,6 +113,9 @@ export interface ElectionSession {
   lockedAt?: string;
   finalMinutesHash?: string;
   isDemoMode?: boolean; // حالت آزمایشی / واقعی
+  principalSeatsCount?: number; // تعداد اعضای اصلی منتخب (پیش‌فرض: ۵)
+  alternateSeatsCount?: number; // تعداد اعضای علی‌البدل منتخب (پیش‌فرض: ۲)
+  candidateElectedRoles?: Record<string, ElectedRole>; // نقش و وضعیت انتخاب هر کاندیدا
 }
 
 export interface Operator {
@@ -131,6 +139,8 @@ export interface Voter {
   birthDate?: string; // تاریخ تولد شمسی (مثلاً 1370/05/12 یا سال 1370)
   age?: number; // سن محاسبه‌شده بر اساس سال تولد شمسی
   isAgeEligible?: boolean; // آیا در صورت فعال بودن شرط رده سنی، واجد شرایط است؟
+  isDisqualified?: boolean; // تیک عدم احراز شرایط (غیرمجاز برای تحویل تعرفه و اخذ رأی)
+  disqualificationReason?: string; // علت عدم احراز شرایط (مثلاً خارج از رده سنی مجاز)
   hasVoted: boolean;
   votedAt?: string;
   status?: VoterStatus;

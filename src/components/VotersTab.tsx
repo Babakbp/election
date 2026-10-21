@@ -1,7 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { Voter, Operator, VoterStatus, ElectionSession } from '../types/election';
-import { toPersianDigits, toEnglishDigits, maskNationalId, formatJalali, parseJalaliBirthDate, isVoterAgeEligible } from '../utils/persian';
+import { 
+  toPersianDigits, 
+  toEnglishDigits, 
+  maskNationalId, 
+  formatJalali, 
+  parseJalaliBirthDate, 
+  isVoterAgeEligible,
+  extractPersianFamilyName,
+  comparePersianAlphabetical,
+  sortVotersByFamilyName
+} from '../utils/persian';
 import { exportVotersTemplateToExcel, exportVotersListToExcel } from '../utils/export';
 import { audioFeedback } from '../utils/audioFeedback';
 import { 
@@ -29,7 +39,8 @@ import {
   Trash2,
   FileCheck,
   Calendar,
-  Shield
+  Shield,
+  Ban
 } from 'lucide-react';
 
 interface VotersTabProps {
@@ -55,7 +66,7 @@ export const VotersTab: React.FC<VotersTabProps> = ({
   onClearAllVoters,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterState, setFilterState] = useState<'ALL' | 'BALLOT_DELIVERED' | 'VOTED' | 'NOT_VOTED'>('ALL');
+  const [filterState, setFilterState] = useState<'ALL' | 'BALLOT_DELIVERED' | 'VOTED' | 'NOT_VOTED' | 'DISQUALIFIED'>('ALL');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isClearAllModalOpen, setIsClearAllModalOpen] = useState(false);
   const [voterToDelete, setVoterToDelete] = useState<Voter | null>(null);
@@ -63,6 +74,7 @@ export const VotersTab: React.FC<VotersTabProps> = ({
   const [newNationalId, setNewNationalId] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [newBirthDate, setNewBirthDate] = useState('');
+  const [newDisqualified, setNewDisqualified] = useState(false);
   const [addError, setAddError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -81,7 +93,16 @@ export const VotersTab: React.FC<VotersTabProps> = ({
   const [quickFullName, setQuickFullName] = useState('');
   const [quickPhone, setQuickPhone] = useState('');
   const [quickBirthDate, setQuickBirthDate] = useState('');
+  const [quickDisqualified, setQuickDisqualified] = useState(false);
   const [quickError, setQuickError] = useState('');
+
+  // Excel Ineligible Voters Action Modal Data
+  const [excelIneligibleModalData, setExcelIneligibleModalData] = useState<{
+    allVoters: Voter[];
+    eligibleVoters: Voter[];
+    ineligibleVoters: { voter: Voter; reason: string }[];
+    fileName: string;
+  } | null>(null);
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const quickNameInputRef = useRef<HTMLInputElement>(null);
@@ -156,12 +177,12 @@ export const VotersTab: React.FC<VotersTabProps> = ({
           message: `⚠️ توجه: تعرفه رأی برای «${found.fullName}» قبلاً در ساعت ${toPersianDigits(found.ballotDeliveredAt || '')} تحویل شده است و در انتظار ثبت رأی می‌باشد.`,
           timestamp: formatJalali(new Date(), true),
         });
-      } else if (session?.hasAgeRestriction && found.isAgeEligible === false) {
+      } else if (found.isDisqualified || (session?.hasAgeRestriction && found.isAgeEligible === false)) {
         audioFeedback.playNotFoundWarning();
         setScanResult({
           type: 'ERROR',
           voter: found,
-          message: `⚠️ هشدار عدم احراز رده سنی! رأی‌دهنده «${found.fullName}» (${found.age ? `سن: ${toPersianDigits(found.age)} سال` : 'فاقد تاریخ تولد'}) شرط سنی مصوب حوزه (حداقل ${toPersianDigits(session.minAge || 18)} سال) را احراز نکرده است. تحویل تعرفه مجاز نمی‌باشد.`,
+          message: `⛔ عدم احراز شرایط رأی‌دهی! رأی‌دهنده «${found.fullName}» (${found.birthDate ? `متولد: ${toPersianDigits(found.birthDate)}` : 'فاقد تاریخ تولد'}) دارای تیک عدم احراز شرایط سنی حوزه می‌باشد. تحویل برگه تعرفه و اخذ رأی غیرمجاز است.`,
           timestamp: formatJalali(new Date(), true),
         });
       } else {
@@ -188,6 +209,7 @@ export const VotersTab: React.FC<VotersTabProps> = ({
       setQuickFullName('');
       setQuickPhone('');
       setQuickBirthDate('');
+      setQuickDisqualified(false);
       setQuickError('');
       setIsQuickRegisterOpen(true);
       setScanResult({
@@ -222,10 +244,18 @@ export const VotersTab: React.FC<VotersTabProps> = ({
         age = parsed.age;
       }
     }
-    const eligibility = isVoterAgeEligible(birthDate, session?.hasAgeRestriction, session?.minAge, session?.maxAge);
+    const eligibility = isVoterAgeEligible(
+      birthDate,
+      session?.hasAgeRestriction,
+      session?.minAge,
+      session?.maxAge,
+      session?.minBirthDate,
+      session?.maxBirthDate
+    );
 
-    if (session?.hasAgeRestriction && !eligibility.isEligible) {
-      if (!confirm(`⚠️ توجه: این فرد بر اساس تاریخ تولد وارد شده، شرط رده سنی را احراز نکرده است (${eligibility.reason || 'خارج از رده سنی'}). آیا با مسئولیت خود مایل به صدور تعرفه هستید؟`)) {
+    const isDisq = quickDisqualified || (session?.hasAgeRestriction && !eligibility.isEligible);
+    if (session?.hasAgeRestriction && !eligibility.isEligible && !quickDisqualified) {
+      if (!confirm(`⚠️ توجه: این فرد بر اساس تاریخ تولد وارد شده، شرط سنی حوزه را احراز نکرده است (${eligibility.reason || 'خارج از بازه مجاز'}).\n\nآیا مایلید با تیک «عدم احراز شرایط» ثبت شود تا در لیست بماند اما نتواند رأی دهد؟`)) {
         return;
       }
     }
@@ -241,23 +271,37 @@ export const VotersTab: React.FC<VotersTabProps> = ({
       birthDate,
       age: age ?? eligibility.age,
       isAgeEligible: eligibility.isEligible,
+      isDisqualified: isDisq,
+      disqualificationReason: isDisq ? (eligibility.reason || 'عدم احراز شرایط سنی مجاز حوزه') : undefined,
       hasVoted: false,
-      status: 'BALLOT_DELIVERED',
-      ballotDeliveredAt: timeNow,
+      status: isDisq ? 'NOT_CHECKED_IN' : 'BALLOT_DELIVERED',
+      ballotDeliveredAt: isDisq ? undefined : timeNow,
     };
 
     onUpdateVoters(
       [...voters, newVoter],
-      `ثبت حضور و تحویل تعرفه با بارکدخوان کارت ملی: ${newVoter.fullName} (${newVoter.nationalIdMasked})`
+      isDisq
+        ? `ثبت با تیک عدم احراز شرایط برای: ${newVoter.fullName} (${newVoter.nationalIdMasked})`
+        : `ثبت حضور و تحویل تعرفه با بارکدخوان کارت ملی: ${newVoter.fullName} (${newVoter.nationalIdMasked})`
     );
 
-    audioFeedback.playScanSuccess();
-    setScanResult({
-      type: 'SUCCESS',
-      voter: newVoter,
-      message: `✅ ثبت دستی و تحویل موفق تعرفه: «${newVoter.fullName}» با کد ملی ${toPersianDigits(newVoter.nationalIdMasked)} به فهرست اضافه و تعرفه تحویل شد.`,
-      timestamp: timeNow,
-    });
+    if (isDisq) {
+      audioFeedback.playNotFoundWarning();
+      setScanResult({
+        type: 'ERROR',
+        voter: newVoter,
+        message: `⛔ رأی‌دهنده «${newVoter.fullName}» با تیک «عدم احراز شرایط سنی» ثبت شد و مجاز به اخذ تعرفه و شرکت در انتخابات نمی‌باشد.`,
+        timestamp: timeNow,
+      });
+    } else {
+      audioFeedback.playScanSuccess();
+      setScanResult({
+        type: 'SUCCESS',
+        voter: newVoter,
+        message: `✅ ثبت دستی و تحویل موفق تعرفه: «${newVoter.fullName}» با کد ملی ${toPersianDigits(newVoter.nationalIdMasked)} به فهرست اضافه و تعرفه تحویل شد.`,
+        timestamp: timeNow,
+      });
+    }
 
     setIsQuickRegisterOpen(false);
     setTimeout(() => {
@@ -267,17 +311,75 @@ export const VotersTab: React.FC<VotersTabProps> = ({
 
   // Stats
   const totalCount = voters.length;
-  const ballotDeliveredCount = voters.filter(v => v.status === 'BALLOT_DELIVERED' || (!v.hasVoted && !!v.ballotDeliveredAt)).length;
-  const votedCount = voters.filter(v => v.status === 'VOTED' || v.hasVoted).length;
-  const remainingCount = voters.filter(v => (v.status === 'NOT_CHECKED_IN' || (!v.status && !v.hasVoted && !v.ballotDeliveredAt))).length;
+  const ballotDeliveredCount = voters.filter(v => !v.isDisqualified && (v.status === 'BALLOT_DELIVERED' || (!v.hasVoted && !!v.ballotDeliveredAt))).length;
+  const votedCount = voters.filter(v => !v.isDisqualified && (v.status === 'VOTED' || v.hasVoted)).length;
+  const disqualifiedCount = voters.filter(v => v.isDisqualified || (session?.hasAgeRestriction && v.isAgeEligible === false)).length;
+  const remainingCount = voters.filter(v => !v.isDisqualified && (session?.hasAgeRestriction ? v.isAgeEligible !== false : true) && (v.status === 'NOT_CHECKED_IN' || (!v.status && !v.hasVoted && !v.ballotDeliveredAt))).length;
   const turnoutPercent = totalCount > 0 ? (((votedCount + ballotDeliveredCount) / totalCount) * 100).toFixed(1) : '0';
+
+  // Toggle Disqualification (تیک عدم احراز شرایط / رفع عدم احراز)
+  const handleToggleDisqualification = (voterId: string) => {
+    if (isLocked) return;
+    const target = voters.find((v) => v.id === voterId);
+    if (!target) return;
+    const isCurrentlyDisq = target.isDisqualified || (session?.hasAgeRestriction && target.isAgeEligible === false);
+    const newDisq = !isCurrentlyDisq;
+    const updated = voters.map((v) =>
+      v.id === voterId
+        ? {
+            ...v,
+            isDisqualified: newDisq,
+            isAgeEligible: !newDisq,
+            disqualificationReason: newDisq ? (v.disqualificationReason || 'عدم احراز شرایط سنی حوزه انتخابیه') : undefined,
+            status: newDisq && v.status === 'BALLOT_DELIVERED' ? ('NOT_CHECKED_IN' as VoterStatus) : v.status,
+            ballotDeliveredAt: newDisq ? undefined : v.ballotDeliveredAt,
+          }
+        : v
+    );
+    onUpdateVoters(
+      updated,
+      `${newDisq ? 'ثبت تیک عدم احراز شرایط' : 'رفع عدم احراز شرایط و تایید صلاحیت'} برای: ${target.fullName}`
+    );
+  };
+
+  // Delete Single Voter from list
+  const handleDeleteSingleVoter = (voterId: string) => {
+    if (isLocked) return;
+    const target = voters.find((v) => v.id === voterId);
+    if (!target) return;
+    if (!confirm(`آیا از حذف «${target.fullName}» از فهرست واجدین شرایط مطمئن هستید؟`)) return;
+    const updated = voters.filter((v) => v.id !== voterId).map((v, idx) => ({ ...v, rowNumber: idx + 1 }));
+    onUpdateVoters(updated, `حذف رأی‌دهنده: ${target.fullName}`);
+  };
+
+  // Delete All Ineligible / Disqualified Voters
+  const handleDeleteAllDisqualifiedVoters = () => {
+    if (isLocked) return;
+    const disqualified = voters.filter(
+      (v) => v.isDisqualified || (session?.hasAgeRestriction && v.isAgeEligible === false)
+    );
+    if (disqualified.length === 0) return;
+    if (
+      !confirm(
+        `آیا از حذف تمامی ${toPersianDigits(disqualified.length)} نفر افراد فاقد شرایط سنی از لیست اطمینان دارید؟`
+      )
+    ) {
+      return;
+    }
+    const updated = voters
+      .filter((v) => !v.isDisqualified && (!session?.hasAgeRestriction || v.isAgeEligible !== false))
+      .map((v, idx) => ({ ...v, rowNumber: idx + 1 }));
+    onUpdateVoters(updated, `حذف دسته‌جمعی ${toPersianDigits(disqualified.length)} نفر افراد فاقد شرایط سنی`);
+  };
 
   // Filtered
   const filteredVoters = voters.filter((v) => {
-    const isVoted = v.status === 'VOTED' || v.hasVoted;
-    const isDelivered = v.status === 'BALLOT_DELIVERED' || (!v.hasVoted && !!v.ballotDeliveredAt);
-    const isNotAttended = !isVoted && !isDelivered;
+    const isDisq = v.isDisqualified || (session?.hasAgeRestriction && v.isAgeEligible === false);
+    const isVoted = !isDisq && (v.status === 'VOTED' || v.hasVoted);
+    const isDelivered = !isDisq && (v.status === 'BALLOT_DELIVERED' || (!v.hasVoted && !!v.ballotDeliveredAt));
+    const isNotAttended = !isDisq && !isVoted && !isDelivered;
 
+    if (filterState === 'DISQUALIFIED' && !isDisq) return false;
     if (filterState === 'VOTED' && !isVoted) return false;
     if (filterState === 'BALLOT_DELIVERED' && !isDelivered) return false;
     if (filterState === 'NOT_VOTED' && !isNotAttended) return false;
@@ -292,6 +394,16 @@ export const VotersTab: React.FC<VotersTabProps> = ({
     }
     return true;
   });
+
+  // Sort State: Default to Persian Alphabetical by Family Name (حروف الفبای فامیلی)
+  const [sortMode, setSortMode] = useState<'FAMILY_NAME' | 'ROW_NUMBER'>('FAMILY_NAME');
+
+  const sortedFilteredVoters = React.useMemo(() => {
+    if (sortMode === 'ROW_NUMBER') {
+      return [...filteredVoters].sort((a, b) => a.rowNumber - b.rowNumber);
+    }
+    return sortVotersByFamilyName(filteredVoters);
+  }, [filteredVoters, sortMode]);
 
   // Download Sample .xlsx
   const handleDownloadSampleXLSX = () => {
@@ -324,15 +436,21 @@ export const VotersTab: React.FC<VotersTabProps> = ({
 
         // Detect column positions from header row
         const headerRow = (rows[0] || []).map((h) => String(h || '').trim());
-        let nameCol = -1;
+        let fullNameCol = -1;
+        let firstNameCol = -1;
+        let lastNameCol = -1;
         let nIdCol = -1;
         let phoneCol = -1;
         let birthDateCol = -1;
 
         headerRow.forEach((colRaw, idx) => {
           const col = colRaw.toLowerCase();
-          if (col.includes('نام') || col.includes('name')) {
-            nameCol = idx;
+          if (col.includes('خانوادگی') || col.includes('فامیلی') || col.includes('شهرت') || col.includes('family') || col.includes('lastname') || col.includes('last name')) {
+            lastNameCol = idx;
+          } else if (col.includes('نام و') || col.includes('نام کامل') || col.includes('fullname') || col.includes('full name')) {
+            fullNameCol = idx;
+          } else if (col.includes('نام') || col.includes('firstname') || col.includes('first name') || col.includes('name')) {
+            firstNameCol = idx;
           } else if (col.includes('ملی') || col.includes('national') || col.includes('nid')) {
             nIdCol = idx;
           } else if (col.includes('تماس') || col.includes('تلفن') || col.includes('همراه') || col.includes('phone') || col.includes('mobile')) {
@@ -342,7 +460,9 @@ export const VotersTab: React.FC<VotersTabProps> = ({
           }
         });
 
-        const newVoterList: Voter[] = [];
+        const eligibleVoters: Voter[] = [];
+        const ineligibleVoters: { voter: Voter; reason: string }[] = [];
+        const allParsedVoters: Voter[] = [];
         // Skip header row
         for (let i = 1; i < rows.length; i++) {
           const row = rows[i];
@@ -353,13 +473,30 @@ export const VotersTab: React.FC<VotersTabProps> = ({
           let phone = '';
           let rawBirthDate = '';
 
-          if (nameCol !== -1) {
-            fullName = String(row[nameCol] || '').trim();
-            rawNId = nIdCol !== -1 ? toEnglishDigits(String(row[nIdCol] || '')).trim() : '';
-            phone = phoneCol !== -1 ? toEnglishDigits(String(row[phoneCol] || '')).trim() : '';
-            rawBirthDate = birthDateCol !== -1 ? String(row[birthDateCol] || '').trim() : '';
-          } else {
-            // Positional fallback
+          if (fullNameCol !== -1) {
+            fullName = String(row[fullNameCol] || '').trim();
+          } else if (firstNameCol !== -1 && lastNameCol !== -1) {
+            const first = String(row[firstNameCol] || '').trim();
+            const last = String(row[lastNameCol] || '').trim();
+            fullName = `${first} ${last}`.trim();
+          } else if (lastNameCol !== -1) {
+            fullName = String(row[lastNameCol] || '').trim();
+          } else if (firstNameCol !== -1) {
+            fullName = String(row[firstNameCol] || '').trim();
+          }
+
+          if (nIdCol !== -1) {
+            rawNId = toEnglishDigits(String(row[nIdCol] || '')).trim();
+          }
+          if (phoneCol !== -1) {
+            phone = toEnglishDigits(String(row[phoneCol] || '')).trim();
+          }
+          if (birthDateCol !== -1) {
+            rawBirthDate = String(row[birthDateCol] || '').trim();
+          }
+
+          // Positional fallback if no header matched
+          if (!fullName && firstNameCol === -1 && lastNameCol === -1 && fullNameCol === -1) {
             const hasLeadingIndex = typeof row[0] === 'number' || (/^\d+$/.test(String(row[0]).trim()) && String(row[0]).trim().length < 6);
             if (hasLeadingIndex) {
               fullName = String(row[1] || '').trim();
@@ -390,12 +527,14 @@ export const VotersTab: React.FC<VotersTabProps> = ({
               birthDate,
               session?.hasAgeRestriction,
               session?.minAge,
-              session?.maxAge
+              session?.maxAge,
+              session?.minBirthDate,
+              session?.maxBirthDate
             );
 
-            newVoterList.push({
-              id: `VOT-${Date.now()}-${newVoterList.length + 1}`,
-              rowNumber: newVoterList.length + 1,
+            const vItem: Voter = {
+              id: `VOT-${Date.now()}-${allParsedVoters.length + 1}`,
+              rowNumber: allParsedVoters.length + 1,
               fullName,
               nationalId: rawNId || '1000000000',
               nationalIdMasked: rawNId ? maskNationalId(rawNId) : '***-****-***',
@@ -403,23 +542,42 @@ export const VotersTab: React.FC<VotersTabProps> = ({
               birthDate,
               age: age ?? eligibility.age,
               isAgeEligible: eligibility.isEligible,
+              isDisqualified: !eligibility.isEligible && !!session?.hasAgeRestriction,
+              disqualificationReason: (!eligibility.isEligible && session?.hasAgeRestriction) ? (eligibility.reason || 'خارج از بازه سنی مجاز') : undefined,
               hasVoted: false,
               status: 'NOT_CHECKED_IN',
-            });
+            };
+
+            allParsedVoters.push(vItem);
+
+            if (session?.hasAgeRestriction && !eligibility.isEligible) {
+              ineligibleVoters.push({ voter: vItem, reason: eligibility.reason || 'خارج از بازه سنی مجاز حوزه' });
+            } else {
+              eligibleVoters.push(vItem);
+            }
           }
         }
 
-        if (newVoterList.length > 0) {
-          const ineligibleCount = newVoterList.filter((v) => v.isAgeEligible === false).length;
-          onUpdateVoters(newVoterList, `بارگذاری ${toPersianDigits(newVoterList.length)} نفر واجد شرایط از فایل اکسل همراه با تاریخ تولد شمسی`);
-          
-          let alertMsg = `تعداد ${toPersianDigits(newVoterList.length)} نفر رأی‌دهنده با موفقیت از فایل .xlsx وارد شدند.`;
-          if (session?.hasAgeRestriction && ineligibleCount > 0) {
-            alertMsg += `\n⚠️ توجه: تعداد ${toPersianDigits(ineligibleCount)} نفر خارج از رده سنی مصوب (حداقل ${toPersianDigits(session.minAge || 18)} سال) شناسایی و با برچسب هشدار علامت‌گذاری شدند.`;
-          }
-          alert(alertMsg);
-        } else {
+        if (allParsedVoters.length === 0) {
           alert('هیچ سطری در فایل اکسل شناسایی نشد.');
+          return;
+        }
+
+        if (session?.hasAgeRestriction && ineligibleVoters.length > 0) {
+          // Open interactive review modal for ineligible voters
+          setExcelIneligibleModalData({
+            allVoters: allParsedVoters,
+            eligibleVoters: eligibleVoters,
+            ineligibleVoters: ineligibleVoters,
+            fileName: file.name,
+          });
+        } else {
+          // All are eligible or age is not restricted (سن ملاک نیست)
+          onUpdateVoters(
+            allParsedVoters,
+            `بارگذاری ${toPersianDigits(allParsedVoters.length)} نفر از فایل اکسل (${session?.hasAgeRestriction ? 'تمامی افراد واجد شرایط سنی هستند' : 'حالت بدون محدودیت سنی - سن ملاک نیست'})`
+          );
+          alert(`تعداد ${toPersianDigits(allParsedVoters.length)} نفر واجد شرایط با موفقیت از فایل اکسل وارد شدند.`);
         }
       } catch (err) {
         alert('خطا در پردازش فایل اکسل (.xlsx). لطفاً از قالب استاندارد استفاده فرمایید.');
@@ -451,7 +609,27 @@ export const VotersTab: React.FC<VotersTabProps> = ({
         age = parsed.age;
       }
     }
-    const eligibility = isVoterAgeEligible(birthDate, session?.hasAgeRestriction, session?.minAge, session?.maxAge);
+    const eligibility = isVoterAgeEligible(
+      birthDate,
+      session?.hasAgeRestriction,
+      session?.minAge,
+      session?.maxAge,
+      session?.minBirthDate,
+      session?.maxBirthDate
+    );
+
+    const isDisq = newDisqualified || (session?.hasAgeRestriction && !eligibility.isEligible);
+    if (session?.hasAgeRestriction && !eligibility.isEligible && !newDisqualified) {
+      const confirmDisq = confirm(
+        `⚠️ توجه: این فرد بر اساس تاریخ تولد وارد شده، شرط سنی حوزه را احراز نکرده است (${eligibility.reason || 'خارج از بازه مجاز'}).\n\n` +
+        `آیا مایلید با تیک «عدم احراز شرایط» ثبت شود تا در لیست بماند اما نتواند رأی دهد؟\n\n` +
+        `[OK / تأیید] = ثبت با تیک عدم احراز شرایط (مسدودسازی رأی‌دهی)\n` +
+        `[Cancel / انصراف] = عدم ثبت و بازگشت به فرم`
+      );
+      if (!confirmDisq) {
+        return;
+      }
+    }
 
     const newV: Voter = {
       id: `VOT-${Date.now()}`,
@@ -463,15 +641,23 @@ export const VotersTab: React.FC<VotersTabProps> = ({
       birthDate,
       age: age ?? eligibility.age,
       isAgeEligible: eligibility.isEligible,
+      isDisqualified: isDisq,
+      disqualificationReason: isDisq ? (eligibility.reason || 'عدم احراز شرایط سنی مجاز حوزه') : undefined,
       hasVoted: false,
       status: 'NOT_CHECKED_IN',
     };
 
-    onUpdateVoters([...voters, newV], `ثبت دستی رأی‌دهنده جدید: ${newV.fullName}`);
+    onUpdateVoters(
+      [...voters, newV],
+      isDisq
+        ? `ثبت دستی با تیک عدم احراز شرایط برای: ${newV.fullName}`
+        : `ثبت دستی رأی‌دهنده جدید: ${newV.fullName}`
+    );
     setNewName('');
     setNewNationalId('');
     setNewPhone('');
     setNewBirthDate('');
+    setNewDisqualified(false);
     setIsAddModalOpen(false);
     setAddError('');
   };
@@ -720,7 +906,7 @@ export const VotersTab: React.FC<VotersTabProps> = ({
       </div>
 
       {/* KPI Counters (Hidden in print) */}
-      <div className="no-print grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className={`no-print grid gap-3 ${disqualifiedCount > 0 ? 'grid-cols-2 sm:grid-cols-5' : 'grid-cols-2 sm:grid-cols-4'}`}>
         <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-4">
           <span className="text-xs text-slate-400 block">کل واجدین شرایط در لیست</span>
           <strong className="text-2xl font-black text-white font-mono mt-1 block">
@@ -748,6 +934,15 @@ export const VotersTab: React.FC<VotersTabProps> = ({
             {toPersianDigits(remainingCount)} <span className="text-xs text-slate-400 font-sans">نفر</span>
           </strong>
         </div>
+
+        {disqualifiedCount > 0 && (
+          <div className="bg-red-950/30 border border-red-500/40 rounded-2xl p-4">
+            <span className="text-xs text-red-300 font-bold block">⛔ عدم احراز شرایط</span>
+            <strong className="text-2xl font-black text-red-400 font-mono mt-1 block">
+              {toPersianDigits(disqualifiedCount)} <span className="text-xs text-red-300/80 font-sans">نفر</span>
+            </strong>
+          </div>
+        )}
       </div>
 
       {/* Search and Filters (Hidden in print) */}
@@ -763,7 +958,7 @@ export const VotersTab: React.FC<VotersTabProps> = ({
           />
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap justify-end">
           <Filter className="w-4 h-4 text-slate-400 flex-shrink-0" />
           <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700 text-xs flex-wrap">
             <button
@@ -790,7 +985,53 @@ export const VotersTab: React.FC<VotersTabProps> = ({
             >
               مراجعه نکرده ({toPersianDigits(remainingCount)})
             </button>
+            <button
+              onClick={() => setFilterState('DISQUALIFIED')}
+              className={`px-3 py-1 rounded-lg transition ${filterState === 'DISQUALIFIED' ? 'bg-red-600 text-white font-bold shadow' : 'text-red-400 hover:text-red-200'}`}
+            >
+              ⛔ عدم احراز شرایط ({toPersianDigits(disqualifiedCount)})
+            </button>
           </div>
+
+          <div className="flex items-center gap-1.5 text-xs bg-slate-900/90 p-1 rounded-xl border border-slate-700">
+            <span className="text-[11px] text-slate-400 px-1.5">مرتب‌سازی:</span>
+            <button
+              type="button"
+              onClick={() => setSortMode('FAMILY_NAME')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+                sortMode === 'FAMILY_NAME' 
+                  ? 'bg-emerald-600 text-white shadow' 
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="مرتب‌سازی الفبایی بر اساس نام خانوادگی (پیش‌فرض)"
+            >
+              <span>الفبای فامیلی (پیش‌فرض)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSortMode('ROW_NUMBER')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+                sortMode === 'ROW_NUMBER' 
+                  ? 'bg-indigo-600 text-white shadow' 
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="مرتب‌سازی بر اساس شماره ردیف ثبت‌نام"
+            >
+              <span>شماره ردیف</span>
+            </button>
+          </div>
+
+          {disqualifiedCount > 0 && !isLocked && (
+            <button
+              type="button"
+              onClick={handleDeleteAllDisqualifiedVoters}
+              className="px-3 py-1.5 bg-red-950/80 hover:bg-red-900 border border-red-700/80 text-red-200 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-sm"
+              title="حذف دسته‌جمعی افراد فاقد شرایط سنی از لیست واجدین"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+              <span>حذف افراد فاقد شرایط ({toPersianDigits(disqualifiedCount)} نفر)</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -801,7 +1042,12 @@ export const VotersTab: React.FC<VotersTabProps> = ({
             <thead className="bg-slate-900/90 text-slate-400 border-b border-slate-700 font-medium">
               <tr>
                 <th className="py-3 px-4 w-14">ردیف</th>
-                <th className="py-3 px-4">نام و نام خانوادگی</th>
+                <th className="py-3 px-4">
+                  <span>نام و نام خانوادگی</span>
+                  {sortMode === 'FAMILY_NAME' && (
+                    <span className="text-[10px] text-emerald-400 font-normal mr-1.5 font-sans">(مرتب‌شده بر اساس حروف الفبای فامیلی)</span>
+                  )}
+                </th>
                 <th className="py-3 px-4">کد ملی (محافظت‌شده)</th>
                 <th className="py-3 px-4">شماره تماس / همراه</th>
                 <th className="py-3 px-4 text-center">تاریخ تولد / سن</th>
@@ -810,17 +1056,25 @@ export const VotersTab: React.FC<VotersTabProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-700/60 text-slate-200">
-              {filteredVoters.map((voter) => {
-                const isVoted = voter.status === 'VOTED' || voter.hasVoted;
-                const isDelivered = voter.status === 'BALLOT_DELIVERED' || (!voter.hasVoted && !!voter.ballotDeliveredAt);
+              {sortedFilteredVoters.map((voter) => {
+                const isDisq = voter.isDisqualified || (session?.hasAgeRestriction && voter.isAgeEligible === false);
+                const isVoted = !isDisq && (voter.status === 'VOTED' || voter.hasVoted);
+                const isDelivered = !isDisq && (voter.status === 'BALLOT_DELIVERED' || (!voter.hasVoted && !!voter.ballotDeliveredAt));
 
                 return (
-                  <tr key={voter.id} className="hover:bg-slate-700/40 transition">
+                  <tr key={voter.id} className={`transition ${isDisq ? 'bg-red-950/20 hover:bg-red-950/30' : 'hover:bg-slate-700/40'}`}>
                     <td className="py-3 px-4 font-mono font-bold text-slate-400">
                       {toPersianDigits(voter.rowNumber)}
                     </td>
                     <td className="py-3 px-4 font-bold text-white">
-                      {voter.fullName}
+                      <div className="flex items-center gap-1.5">
+                        {isDisq && (
+                          <span title="عدم احراز شرایط">
+                            <Ban className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
+                          </span>
+                        )}
+                        <span className={isDisq ? 'text-red-200' : 'text-white'}>{voter.fullName}</span>
+                      </div>
                     </td>
                     <td className="py-3 px-4 font-mono text-slate-300">
                       {voter.nationalIdMasked}
@@ -843,7 +1097,7 @@ export const VotersTab: React.FC<VotersTabProps> = ({
                             )}
                             {session?.hasAgeRestriction && (
                               voter.isAgeEligible === false ? (
-                                <span className="text-[10px] bg-red-500/20 text-red-300 border border-red-500/40 px-1.5 py-0.5 rounded font-bold" title="این فرد شرط رده سنی را احراز نکرده است">
+                                <span className="text-[10px] bg-red-500/20 text-red-300 border border-red-500/40 px-1.5 py-0.5 rounded font-bold" title={voter.disqualificationReason || 'خارج از بازه سنی مجاز'}>
                                   عدم احراز سن
                                 </span>
                               ) : (
@@ -859,7 +1113,12 @@ export const VotersTab: React.FC<VotersTabProps> = ({
                       )}
                     </td>
                     <td className="py-3 px-4 text-center">
-                      {isVoted ? (
+                      {isDisq ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-red-500/20 text-red-300 border border-red-500/40 shadow-sm" title={voter.disqualificationReason || 'عدم احراز شرایط سنی حوزه'}>
+                          <Ban className="w-3.5 h-3.5 text-red-400" />
+                          <span>⛔ عدم احراز شرایط (غیرمجاز)</span>
+                        </span>
+                      ) : isVoted ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm">
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                           <span>رای داده شد {voter.votedAt ? `(${toPersianDigits(voter.votedAt)})` : ''}</span>
@@ -878,92 +1137,132 @@ export const VotersTab: React.FC<VotersTabProps> = ({
                     </td>
                     <td className="py-3 px-4 text-center">
                       <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                        {!isDelivered && !isVoted && (
-                          <button
-                            type="button"
-                            disabled={isLocked}
-                            onClick={() => {
-                              audioFeedback.playVoterCheckin();
-                              if (onSetVoterStatus) {
-                                onSetVoterStatus(voter.id, 'BALLOT_DELIVERED');
-                              } else {
-                                onToggleVoterStatus(voter.id);
-                              }
-                            }}
-                            className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow transition flex items-center gap-1"
-                            title="تحویل برگه تعرفه به رأی‌دهنده"
-                          >
-                            <FileCheck className="w-3.5 h-3.5" />
-                            <span>تحویل تعرفه</span>
-                          </button>
-                        )}
-
-                        {isDelivered && (
+                        {isDisq ? (
                           <>
                             <button
                               type="button"
                               disabled={isLocked}
-                              onClick={() => {
-                                audioFeedback.playScanSuccess();
-                                if (onSetVoterStatus) {
-                                  onSetVoterStatus(voter.id, 'VOTED');
-                                } else {
-                                  onToggleVoterStatus(voter.id);
-                                }
-                              }}
-                              className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow transition flex items-center gap-1"
-                              title="تایید انداختن رأی در صندوق"
+                              onClick={() => handleToggleDisqualification(voter.id)}
+                              className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-amber-600/30 hover:bg-amber-600/50 text-amber-200 border border-amber-500/40 transition flex items-center gap-1"
+                              title="تغییر وضعیت احراز صلاحیت و رفع مسدودیت"
                             >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>ثبت رای داده شد</span>
+                              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+                              <span>رفع عدم احراز</span>
                             </button>
                             <button
                               type="button"
                               disabled={isLocked}
-                              onClick={() => {
-                                if (onSetVoterStatus) {
-                                  onSetVoterStatus(voter.id, 'NOT_CHECKED_IN');
-                                } else {
-                                  onToggleVoterStatus(voter.id);
-                                }
-                              }}
-                              className="px-2 py-1.5 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700 transition"
-                              title="لغو تحویل تعرفه"
+                              onClick={() => setVoterToDelete(voter)}
+                              className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-red-950/70 hover:bg-red-900 text-red-300 border border-red-800 transition flex items-center gap-1"
+                              title={`حذف «${voter.fullName}» از فهرست واجدین شرایط`}
                             >
-                              لغو
+                              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                              <span>حذف از لیست</span>
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            {!isDelivered && !isVoted && (
+                              <button
+                                type="button"
+                                disabled={isLocked}
+                                onClick={() => {
+                                  audioFeedback.playVoterCheckin();
+                                  if (onSetVoterStatus) {
+                                    onSetVoterStatus(voter.id, 'BALLOT_DELIVERED');
+                                  } else {
+                                    onToggleVoterStatus(voter.id);
+                                  }
+                                }}
+                                className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow transition flex items-center gap-1"
+                                title="تحویل برگه تعرفه به رأی‌دهنده"
+                              >
+                                <FileCheck className="w-3.5 h-3.5" />
+                                <span>تحویل تعرفه</span>
+                              </button>
+                            )}
+
+                            {isDelivered && (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={isLocked}
+                                  onClick={() => {
+                                    audioFeedback.playScanSuccess();
+                                    if (onSetVoterStatus) {
+                                      onSetVoterStatus(voter.id, 'VOTED');
+                                    } else {
+                                      onToggleVoterStatus(voter.id);
+                                    }
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow transition flex items-center gap-1"
+                                  title="تایید انداختن رأی در صندوق"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>ثبت رای داده شد</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isLocked}
+                                  onClick={() => {
+                                    if (onSetVoterStatus) {
+                                      onSetVoterStatus(voter.id, 'NOT_CHECKED_IN');
+                                    } else {
+                                      onToggleVoterStatus(voter.id);
+                                    }
+                                  }}
+                                  className="px-2 py-1.5 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700 transition"
+                                  title="لغو تحویل تعرفه"
+                                >
+                                  لغو
+                                </button>
+                              </>
+                            )}
+
+                            {isVoted && (
+                              <button
+                                type="button"
+                                disabled={isLocked}
+                                onClick={() => {
+                                  if (onSetVoterStatus) {
+                                    onSetVoterStatus(voter.id, 'BALLOT_DELIVERED');
+                                  } else {
+                                    onToggleVoterStatus(voter.id);
+                                  }
+                                }}
+                                className="px-2.5 py-1.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
+                                title="بازگردانی به وضعیت تعرفه تحویل شد"
+                              >
+                                لغو رأی
+                              </button>
+                            )}
+
+                            {/* Mark as Disqualified button */}
+                            {!isVoted && (
+                              <button
+                                type="button"
+                                disabled={isLocked}
+                                onClick={() => handleToggleDisqualification(voter.id)}
+                                className="p-1.5 rounded-xl text-xs text-slate-400 hover:text-amber-400 hover:bg-slate-700/80 transition"
+                                title="تیک عدم احراز شرایط (مسدودسازی رأی‌دهی)"
+                              >
+                                <Ban className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            {/* Individual Delete Button (Requested: در لیست دکمه حذف فرد ایجاد کن) */}
+                            <button
+                              type="button"
+                              disabled={isLocked}
+                              onClick={() => setVoterToDelete(voter)}
+                              className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-red-950/50 hover:bg-red-900 text-red-300 hover:text-red-100 border border-red-800/60 transition shadow-sm flex items-center gap-1 disabled:opacity-40"
+                              title={`حذف «${voter.fullName}» از فهرست واجدین شرایط`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                              <span>حذف فرد</span>
                             </button>
                           </>
                         )}
-
-                        {isVoted && (
-                          <button
-                            type="button"
-                            disabled={isLocked}
-                            onClick={() => {
-                              if (onSetVoterStatus) {
-                                onSetVoterStatus(voter.id, 'BALLOT_DELIVERED');
-                              } else {
-                                onToggleVoterStatus(voter.id);
-                              }
-                            }}
-                            className="px-2.5 py-1.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
-                            title="بازگردانی به وضعیت تعرفه تحویل شد"
-                          >
-                            لغو رأی
-                          </button>
-                        )}
-
-                        {/* Individual Delete Button (Requested: در لیست دکمه حذف فرد ایجاد کن) */}
-                        <button
-                          type="button"
-                          disabled={isLocked}
-                          onClick={() => setVoterToDelete(voter)}
-                          className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-red-950/50 hover:bg-red-900 text-red-300 hover:text-red-100 border border-red-800/60 transition shadow-sm flex items-center gap-1 disabled:opacity-40"
-                          title={`حذف «${voter.fullName}» از فهرست واجدین شرایط`}
-                        >
-                          <Trash2 className="w-3.5 h-3.5 text-red-400" />
-                          <span>حذف فرد</span>
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -984,79 +1283,96 @@ export const VotersTab: React.FC<VotersTabProps> = ({
           PRINT ONLY: ULTRA-COMPACT 2-COLUMN A4 ATTENDANCE ROSTER SHEET
           Designed to be extremely dense, small font, taking minimal space on paper.
       ========================================================================== */}
-      <div className="print-only hidden p-2 bg-white text-black" dir="rtl">
-        <div className="text-center border-b-2 border-black pb-1 mb-2">
-          <h2 className="text-xs font-black">دفترچه رسمی واجدین شرایط و کنترل تعرفه رأی‌دهندگان</h2>
-          <div className="flex justify-between text-[8px] font-mono mt-0.5">
-            <span>کل واجدین: {toPersianDigits(voters.length)} نفر</span>
-            <span>تاریخ چاپ: {formatJalali(new Date(), false)}</span>
-            <span>شعبه اخذ رأی حضوری</span>
+      {(() => {
+        const printSortedVoters = sortVotersByFamilyName(voters);
+        const halfCount = Math.ceil(printSortedVoters.length / 2);
+
+        return (
+          <div className="print-only hidden p-2 bg-white text-black" dir="rtl">
+            <div className="text-center border-b-2 border-black pb-1 mb-2">
+              <h2 className="text-xs font-black">دفترچه رسمی واجدین شرایط و کنترل تعرفه رأی‌دهندگان (مرتب‌شده الفبایی بر اساس نام خانوادگی)</h2>
+              <div className="flex justify-between text-[8px] font-mono mt-0.5">
+                <span>کل واجدین: {toPersianDigits(voters.length)} نفر</span>
+                <span>تاریخ چاپ: {formatJalali(new Date(), false)}</span>
+                <span>شعبه اخذ رأی حضوری</span>
+              </div>
+            </div>
+
+            {/* 2-Column Super Compact Grid */}
+            <div className="grid grid-cols-2 gap-2 text-[7.5px] leading-none">
+              {/* Half 1 */}
+              <table className="w-full border-collapse border border-black">
+                <thead>
+                  <tr className="bg-gray-200">
+                    <th className="border border-black p-0.5 w-5 text-center">ردیف</th>
+                    <th className="border border-black p-0.5 text-right">نام و نام خانوادگی</th>
+                    <th className="border border-black p-0.5 text-center w-14">کد ملی</th>
+                    <th className="border border-black p-0.5 text-center w-14">همراه</th>
+                    <th className="border border-black p-0.5 text-center w-12">امضا/اثر</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {printSortedVoters.slice(0, halfCount).map((v) => {
+                    const isDisq = v.isDisqualified || (session?.hasAgeRestriction && v.isAgeEligible === false);
+                    return (
+                      <tr key={v.id} className={`border-b border-black ${isDisq ? 'bg-red-50' : ''}`}>
+                        <td className="border border-black p-0.5 text-center font-mono">{toPersianDigits(v.rowNumber)}</td>
+                        <td className="border border-black p-0.5 font-bold truncate max-w-[90px]">{v.fullName}</td>
+                        <td className="border border-black p-0.5 text-center font-mono">{v.nationalIdMasked}</td>
+                        <td className="border border-black p-0.5 text-center font-mono">{toPersianDigits(v.phoneNumber)}</td>
+                        <td className="border border-black p-0.5 text-center text-[7px] font-bold">
+                          {isDisq
+                            ? '⛔ عدم احراز'
+                            : v.status === 'VOTED' || v.hasVoted
+                            ? '✓ رای داده شد'
+                            : v.status === 'BALLOT_DELIVERED' || v.ballotDeliveredAt
+                            ? '✓ تعرفه تحویل'
+                            : ''}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {/* Half 2 */}
+              <table className="w-full border-collapse border border-black">
+                <thead>
+                  <tr className="bg-gray-200">
+                    <th className="border border-black p-0.5 w-5 text-center">ردیف</th>
+                    <th className="border border-black p-0.5 text-right">نام و نام خانوادگی</th>
+                    <th className="border border-black p-0.5 text-center w-14">کد ملی</th>
+                    <th className="border border-black p-0.5 text-center w-14">همراه</th>
+                    <th className="border border-black p-0.5 text-center w-12">امضا/اثر</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {printSortedVoters.slice(halfCount).map((v) => {
+                    const isDisq = v.isDisqualified || (session?.hasAgeRestriction && v.isAgeEligible === false);
+                    return (
+                      <tr key={v.id} className={`border-b border-black ${isDisq ? 'bg-red-50' : ''}`}>
+                        <td className="border border-black p-0.5 text-center font-mono">{toPersianDigits(v.rowNumber)}</td>
+                        <td className="border border-black p-0.5 font-bold truncate max-w-[90px]">{v.fullName}</td>
+                        <td className="border border-black p-0.5 text-center font-mono">{v.nationalIdMasked}</td>
+                        <td className="border border-black p-0.5 text-center font-mono">{toPersianDigits(v.phoneNumber)}</td>
+                        <td className="border border-black p-0.5 text-center text-[7px] font-bold">
+                          {isDisq
+                            ? '⛔ عدم احراز'
+                            : v.status === 'VOTED' || v.hasVoted
+                            ? '✓ رای داده شد'
+                            : v.status === 'BALLOT_DELIVERED' || v.ballotDeliveredAt
+                            ? '✓ تعرفه تحویل'
+                            : ''}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-
-        {/* 2-Column Super Compact Grid */}
-        <div className="grid grid-cols-2 gap-2 text-[7.5px] leading-none">
-          {/* Half 1 */}
-          <table className="w-full border-collapse border border-black">
-            <thead>
-              <tr className="bg-gray-200">
-                <th className="border border-black p-0.5 w-5 text-center">ردیف</th>
-                <th className="border border-black p-0.5 text-right">نام و نام خانوادگی</th>
-                <th className="border border-black p-0.5 text-center w-14">کد ملی</th>
-                <th className="border border-black p-0.5 text-center w-14">همراه</th>
-                <th className="border border-black p-0.5 text-center w-12">امضا/اثر</th>
-              </tr>
-            </thead>
-            <tbody>
-              {voters.slice(0, Math.ceil(voters.length / 2)).map((v) => (
-                <tr key={v.id} className="border-b border-black">
-                  <td className="border border-black p-0.5 text-center font-mono">{toPersianDigits(v.rowNumber)}</td>
-                  <td className="border border-black p-0.5 font-bold truncate max-w-[90px]">{v.fullName}</td>
-                  <td className="border border-black p-0.5 text-center font-mono">{v.nationalIdMasked}</td>
-                  <td className="border border-black p-0.5 text-center font-mono">{toPersianDigits(v.phoneNumber)}</td>
-                  <td className="border border-black p-0.5 text-center text-[7px] text-gray-700 font-bold">
-                    {v.status === 'VOTED' || v.hasVoted
-                      ? '✓ رای داده شد'
-                      : v.status === 'BALLOT_DELIVERED' || v.ballotDeliveredAt
-                      ? '✓ تعرفه تحویل شد'
-                      : ''}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {/* Half 2 */}
-          <table className="w-full border-collapse border border-black">
-            <thead>
-              <tr className="bg-gray-200">
-                <th className="border border-black p-0.5 w-5 text-center">ردیف</th>
-                <th className="border border-black p-0.5 text-right">نام و نام خانوادگی</th>
-                <th className="border border-black p-0.5 text-center w-14">کد ملی</th>
-                <th className="border border-black p-0.5 text-center w-14">همراه</th>
-                <th className="border border-black p-0.5 text-center w-12">امضا/اثر</th>
-              </tr>
-            </thead>
-            <tbody>
-              {voters.slice(Math.ceil(voters.length / 2)).map((v) => (
-                <tr key={v.id} className="border-b border-black">
-                  <td className="border border-black p-0.5 text-center font-mono">{toPersianDigits(v.rowNumber)}</td>
-                  <td className="border border-black p-0.5 font-bold truncate max-w-[90px]">{v.fullName}</td>
-                  <td className="border border-black p-0.5 text-center font-mono">{v.nationalIdMasked}</td>
-                  <td className="border border-black p-0.5 text-center font-mono">{toPersianDigits(v.phoneNumber)}</td>
-                  <td className="border border-black p-0.5 text-center text-[7px] text-gray-700 font-bold">
-                    {v.status === 'VOTED' || v.hasVoted
-                      ? '✓ رای داده شد'
-                      : v.status === 'BALLOT_DELIVERED' || v.ballotDeliveredAt
-                      ? '✓ تعرفه تحویل شد'
-                      : ''}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* Add Voter Modal */}
       {isAddModalOpen && (
@@ -1119,22 +1435,58 @@ export const VotersTab: React.FC<VotersTabProps> = ({
                   if (!parsed || !parsed.isValid) {
                     return <span className="text-[10px] text-amber-400 mt-1 block">فرمت صحیح: 1375/04/20 یا 1375</span>;
                   }
-                  const eligibility = isVoterAgeEligible(parsed.formattedBirthDate, session?.hasAgeRestriction, session?.minAge, session?.maxAge);
+                  const eligibility = isVoterAgeEligible(
+                    parsed.formattedBirthDate,
+                    session?.hasAgeRestriction,
+                    session?.minAge,
+                    session?.maxAge,
+                    session?.minBirthDate,
+                    session?.maxBirthDate
+                  );
                   return (
-                    <div className="flex items-center gap-2 mt-1.5 text-[11px] flex-wrap">
-                      <span className="text-slate-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-700 font-mono">
-                        سن محاسبه‌شده: {toPersianDigits(parsed.age)} سال (متولد {toPersianDigits(parsed.birthYear)})
-                      </span>
-                      {session?.hasAgeRestriction && (
-                        eligibility.isEligible ? (
-                          <span className="text-emerald-300 font-bold bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/30">
-                            ✓ واجد شرایط سنی
-                          </span>
+                    <div className="space-y-2 mt-2">
+                      <div className="flex items-center gap-2 text-[11px] flex-wrap">
+                        <span className="text-slate-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-700 font-mono">
+                          سن محاسبه‌شده: {toPersianDigits(parsed.age)} سال (متولد {toPersianDigits(parsed.birthYear)})
+                        </span>
+                        {session?.hasAgeRestriction ? (
+                          eligibility.isEligible ? (
+                            <span className="text-emerald-300 font-bold bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/30">
+                              ✓ واجد شرایط سنی
+                            </span>
+                          ) : (
+                            <span className="text-red-300 font-bold bg-red-500/20 px-2 py-0.5 rounded border border-red-500/30">
+                              ⚠️ فاقد شرایط سنی مجاز
+                            </span>
+                          )
                         ) : (
-                          <span className="text-red-300 font-bold bg-red-500/20 px-2 py-0.5 rounded border border-red-500/30">
-                            ⚠️ {eligibility.reason}
+                          <span className="text-emerald-400 text-[10px] bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-800/60">
+                            سن ملاک نیست (واجد شرایط)
                           </span>
-                        )
+                        )}
+                      </div>
+
+                      {session?.hasAgeRestriction && !eligibility.isEligible && (
+                        <div className="bg-red-950/50 border border-red-700/80 p-3 rounded-xl text-xs text-red-200 space-y-2">
+                          <div className="flex items-center gap-1.5 font-bold text-red-300">
+                            <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                            <span>علت عدم احراز: {eligibility.reason}</span>
+                          </div>
+                          <p className="text-[11px] text-red-200/90 leading-relaxed">
+                            این فرد خارج از بازه سنی تعیین‌شده متولد شده است. در صورت ثبت، تیک «عدم احراز شرایط» اعمال و صدور تعرفه برای وی مسدود خواهد شد.
+                          </p>
+                          <label className="flex items-center gap-2 cursor-pointer pt-1 border-t border-red-800/60">
+                            <input
+                              type="checkbox"
+                              checked={newDisqualified}
+                              onChange={(e) => setNewDisqualified(e.target.checked)}
+                              className="rounded text-red-600 focus:ring-red-500 bg-slate-900 border-red-700"
+                            />
+                            <span className="text-xs font-bold text-red-300">
+                              ثبت با تیک «عدم احراز شرایط» (غیرمجاز برای رأی‌دهی)
+                            </span>
+                          </label>
+                        </div>
                       )}
                     </div>
                   );
@@ -1368,6 +1720,105 @@ export const VotersTab: React.FC<VotersTabProps> = ({
               >
                 <Trash2 className="w-4 h-4" />
                 <span>تأیید و حذف این فرد</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Excel Ineligible Voters Action Modal */}
+      {excelIneligibleModalData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border-2 border-amber-500/70 rounded-3xl max-w-2xl w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 text-slate-100 text-right max-h-[90vh] flex flex-col" dir="rtl">
+            <div className="flex items-center gap-3 text-amber-400">
+              <div className="p-2.5 bg-amber-500/20 rounded-2xl border border-amber-500/40">
+                <AlertTriangle className="w-6 h-6 text-amber-400" />
+              </div>
+              <div>
+                <h4 className="font-black text-base text-white">بررسی فاقدین شرایط سنی در فایل اکسل</h4>
+                <p className="text-xs text-amber-300">فایل ورودی: {excelIneligibleModalData.fileName}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 bg-slate-950/80 p-3 rounded-2xl border border-slate-800 text-center">
+              <div>
+                <span className="text-[11px] text-slate-400 block">کل افراد در فایل</span>
+                <strong className="text-lg font-bold text-white font-mono">{toPersianDigits(excelIneligibleModalData.allVoters.length)} نفر</strong>
+              </div>
+              <div>
+                <span className="text-[11px] text-emerald-400 block">واجدین شرایط سنی</span>
+                <strong className="text-lg font-bold text-emerald-300 font-mono">{toPersianDigits(excelIneligibleModalData.eligibleVoters.length)} نفر</strong>
+              </div>
+              <div>
+                <span className="text-[11px] text-red-400 block">فاقدین شرایط سنی</span>
+                <strong className="text-lg font-bold text-red-300 font-mono">{toPersianDigits(excelIneligibleModalData.ineligibleVoters.length)} نفر</strong>
+              </div>
+            </div>
+
+            <div className="space-y-1.5 flex-1 overflow-hidden flex flex-col min-h-0">
+              <span className="text-xs font-bold text-slate-300">
+                فهرست افراد شناسایی‌شده خارج از بازه سنی مجاز:
+              </span>
+              <div className="overflow-y-auto max-h-48 border border-slate-800 rounded-xl bg-slate-950/60 divide-y divide-slate-800">
+                {excelIneligibleModalData.ineligibleVoters.map((item, idx) => (
+                  <div key={idx} className="p-2.5 flex items-center justify-between text-xs hover:bg-slate-900/50">
+                    <div>
+                      <strong className="text-white block">{toPersianDigits(idx + 1)}. {item.voter.fullName}</strong>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        کد ملی: {toPersianDigits(item.voter.nationalIdMasked)} | تولد: {item.voter.birthDate ? toPersianDigits(item.voter.birthDate) : 'نامشخص'}
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-bold text-red-300 bg-red-950/80 px-2 py-1 rounded border border-red-800">
+                      {item.reason}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-400 leading-relaxed bg-slate-950/50 p-3 rounded-xl border border-slate-800">
+              لطفاً یکی از گزینه‌های زیر را انتخاب فرمایید: می‌توانید افراد فاقد شرایط سنی را با <strong>«تیک عدم احراز شرایط»</strong> وارد کنید تا در سیستم مسدود شوند و امکان رأی‌دهی نداشته باشند، و یا آنها را به طور کامل از فهرست <strong>«حذف»</strong> کنید.
+            </p>
+
+            <div className="flex flex-col sm:flex-row items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setExcelIneligibleModalData(null)}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition"
+              >
+                انصراف و لغو
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onUpdateVoters(
+                    excelIneligibleModalData.eligibleVoters,
+                    `بارگذاری اکسل با حذف ${toPersianDigits(excelIneligibleModalData.ineligibleVoters.length)} نفر فاقد شرایط سنی (فقط واجدین شرایط وارد شدند)`
+                  );
+                  alert(`تعداد ${toPersianDigits(excelIneligibleModalData.eligibleVoters.length)} نفر واجد شرایط با موفقیت وارد شدند.\nافراد فاقد شرایط سنی (${toPersianDigits(excelIneligibleModalData.ineligibleVoters.length)} نفر) از لیست حذف شدند.`);
+                  setExcelIneligibleModalData(null);
+                }}
+                className="w-full sm:w-auto px-4 py-2.5 bg-rose-700 hover:bg-rose-600 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>حذف فاقدین شرایط از لیست ({toPersianDigits(excelIneligibleModalData.ineligibleVoters.length)} نفر)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onUpdateVoters(
+                    excelIneligibleModalData.allVoters,
+                    `بارگذاری اکسل همراه با تیک عدم احراز شرایط برای ${toPersianDigits(excelIneligibleModalData.ineligibleVoters.length)} نفر فاقد شرایط سنی`
+                  );
+                  alert(`تعداد ${toPersianDigits(excelIneligibleModalData.allVoters.length)} نفر وارد شدند.\nتعداد ${toPersianDigits(excelIneligibleModalData.ineligibleVoters.length)} نفر فاقد شرایط سنی با تیک «عدم احراز شرایط» علامت‌گذاری شده و حق رأی نخواهند داشت.`);
+                  setExcelIneligibleModalData(null);
+                }}
+                className="w-full sm:w-auto px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-amber-950/60 transition"
+              >
+                <Ban className="w-4 h-4 text-slate-950" />
+                <span>تیک عدم احراز شرایط (ماندن در لیست با مسدودسازی رأی)</span>
               </button>
             </div>
           </div>

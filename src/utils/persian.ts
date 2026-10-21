@@ -226,18 +226,65 @@ export function parseJalaliBirthDate(input: string | number | undefined | null):
 }
 
 /**
- * Checks whether a voter meets the age restriction configured for the election session
+ * Converts a Jalali date string (e.g. "1375/04/12", "1375", "1375-4-12") to a comparable integer (YYYYMMDD).
+ * For year-only inputs, isUpperBound determines whether it defaults to start-of-year (0101) or end-of-year (1229).
+ */
+export function normalizeJalaliDateToComparable(rawDate: string | undefined | null, isUpperBound = false): number | null {
+  if (!rawDate) return null;
+  const cleaned = toEnglishDigits(String(rawDate)).trim();
+  if (!cleaned) return null;
+
+  // Pattern 1: YYYY/MM/DD or YYYY-MM-DD or YYYY.MM.DD
+  const fullMatch = cleaned.match(/^(\d{2,4})[./-](\d{1,2})[./-](\d{1,2})$/);
+  if (fullMatch) {
+    let year = parseInt(fullMatch[1], 10);
+    if (year < 100) year = year >= 0 && year <= 30 ? 1400 + year : 1300 + year;
+    const month = Math.min(12, Math.max(1, parseInt(fullMatch[2], 10)));
+    const day = Math.min(31, Math.max(1, parseInt(fullMatch[3], 10)));
+    return year * 10000 + month * 100 + day;
+  }
+
+  // Pattern 2: Year only YYYY (e.g. 1375)
+  const yearMatch = cleaned.match(/^(\d{4})$/);
+  if (yearMatch) {
+    const year = parseInt(yearMatch[1], 10);
+    return isUpperBound ? year * 10000 + 1229 : year * 10000 + 101;
+  }
+
+  // Pattern 3: Year and Month YYYY/MM
+  const ymMatch = cleaned.match(/^(\d{4})[./-](\d{1,2})$/);
+  if (ymMatch) {
+    const year = parseInt(ymMatch[1], 10);
+    const month = Math.min(12, Math.max(1, parseInt(ymMatch[2], 10)));
+    return isUpperBound ? year * 10000 + month * 100 + 29 : year * 10000 + month * 100 + 1;
+  }
+
+  return null;
+}
+
+/**
+ * Checks whether a voter meets the age restriction configured for the election session.
+ * Supports:
+ * 1. "سن ملاک نیست" (hasAgeRestriction = false) -> All voters eligible
+ * 2. Date of birth range (minBirthDate & maxBirthDate)
+ * 3. Min/Max age fallback
  */
 export function isVoterAgeEligible(
   birthDate: string | undefined | null,
   hasAgeRestriction?: boolean,
-  minAge = 18,
-  maxAge?: number
-): { isEligible: boolean; age?: number; reason?: string } {
-  // If age restriction is turned off, everyone is eligible
+  minAgeOrOptions?: number | { minBirthDate?: string; maxBirthDate?: string; minAge?: number; maxAge?: number },
+  maxAgeArg?: number,
+  minBirthDateArg?: string,
+  maxBirthDateArg?: string
+): { isEligible: boolean; age?: number; reason?: string; formattedBirthDate?: string } {
+  // If age restriction is turned off (سن ملاک نیست), everyone is eligible
   if (!hasAgeRestriction) {
     const parsed = parseJalaliBirthDate(birthDate);
-    return { isEligible: true, age: parsed?.age };
+    return {
+      isEligible: true,
+      age: parsed?.age,
+      formattedBirthDate: parsed?.formattedBirthDate,
+    };
   }
 
   const parsed = parseJalaliBirthDate(birthDate);
@@ -248,25 +295,154 @@ export function isVoterAgeEligible(
     };
   }
 
-  const effectiveMin = minAge ?? 18;
-  if (parsed.age < effectiveMin) {
-    return {
-      isEligible: false,
-      age: parsed.age,
-      reason: `عدم احراز رده سنی (سن: ${parsed.age} سال - حداقل مجاز: ${effectiveMin} سال)`,
-    };
+  let minBirthDate: string | undefined = minBirthDateArg;
+  let maxBirthDate: string | undefined = maxBirthDateArg;
+  let minAge: number | undefined = undefined;
+  let maxAge: number | undefined = maxAgeArg;
+
+  if (typeof minAgeOrOptions === 'object' && minAgeOrOptions !== null) {
+    minBirthDate = minBirthDate || minAgeOrOptions.minBirthDate;
+    maxBirthDate = maxBirthDate || minAgeOrOptions.maxBirthDate;
+    minAge = minAgeOrOptions.minAge;
+    maxAge = maxAge || minAgeOrOptions.maxAge;
+  } else if (typeof minAgeOrOptions === 'number') {
+    minAge = minAgeOrOptions;
   }
 
-  if (maxAge && parsed.age > maxAge) {
-    return {
-      isEligible: false,
-      age: parsed.age,
-      reason: `عدم احراز رده سنی (سن: ${parsed.age} سال - سقف مجاز: ${maxAge} سال)`,
-    };
+  const voterComp = normalizeJalaliDateToComparable(parsed.formattedBirthDate);
+
+  // Check 1: Minimum Birth Date (کمترین تاریخ تولد مجاز - یعنی متولدین بعد از این تاریخ)
+  if (minBirthDate && voterComp !== null) {
+    const minComp = normalizeJalaliDateToComparable(minBirthDate, false);
+    if (minComp !== null && voterComp < minComp) {
+      return {
+        isEligible: false,
+        age: parsed.age,
+        formattedBirthDate: parsed.formattedBirthDate,
+        reason: `خارج از بازه سنی: تاریخ تولد (${toPersianDigits(parsed.formattedBirthDate)}) قبل از کمترین تاریخ مجاز (${toPersianDigits(minBirthDate)}) است`,
+      };
+    }
+  }
+
+  // Check 2: Maximum Birth Date (بیشترین تاریخ تولد مجاز - یعنی متولدین تا این تاریخ)
+  if (maxBirthDate && voterComp !== null) {
+    const maxComp = normalizeJalaliDateToComparable(maxBirthDate, true);
+    if (maxComp !== null && voterComp > maxComp) {
+      return {
+        isEligible: false,
+        age: parsed.age,
+        formattedBirthDate: parsed.formattedBirthDate,
+        reason: `خارج از بازه سنی: تاریخ تولد (${toPersianDigits(parsed.formattedBirthDate)}) بعد از بیشترین تاریخ مجاز (${toPersianDigits(maxBirthDate)}) است (فاقد حداقل سن قانونی)`,
+      };
+    }
+  }
+
+  // Fallback to minAge if date range not specified
+  if (!maxBirthDate && minAge !== undefined && minAge > 0) {
+    if (parsed.age < minAge) {
+      return {
+        isEligible: false,
+        age: parsed.age,
+        formattedBirthDate: parsed.formattedBirthDate,
+        reason: `عدم احراز حداقل سن قانونی (سن: ${toPersianDigits(parsed.age)} سال - حداقل مجاز: ${toPersianDigits(minAge)} سال)`,
+      };
+    }
+  }
+
+  // Fallback to maxAge if date range not specified
+  if (!minBirthDate && maxAge !== undefined && maxAge > 0) {
+    if (parsed.age > maxAge) {
+      return {
+        isEligible: false,
+        age: parsed.age,
+        formattedBirthDate: parsed.formattedBirthDate,
+        reason: `بیشتر از حداکثر سقف سنی (سن: ${toPersianDigits(parsed.age)} سال - سقف مجاز: ${toPersianDigits(maxAge)} سال)`,
+      };
+    }
   }
 
   return {
     isEligible: true,
     age: parsed.age,
+    formattedBirthDate: parsed.formattedBirthDate,
   };
 }
+
+/**
+ * Extract Persian Family Name (نام خانوادگی) from full name.
+ * Handles common prefixes like سید، سیده، میر، حاج، حاجی، دکتر، مهندس، شیخ، کربلایی
+ * and compound prefixes/affixes like پور، زاده، نیا، اصل، مقدم، وند، تبار
+ */
+export function extractPersianFamilyName(fullName: string): string {
+  if (!fullName) return '';
+  const clean = fullName
+    .replace(/[ـ\u200c\u200d]/g, ' ')
+    .trim();
+  const parts = clean.split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return parts[0] || '';
+
+  // Common honorific / prefix titles to ignore when identifying family name
+  const honorifics = new Set([
+    'سید', 'سیده', 'میر', 'حاج', 'حاجی', 'شیخ', 'کربلایی', 'مشهدی', 
+    'دکتر', 'مهندس', 'آقای', 'خانم', 'استاد', 'شهید', 'سرکار'
+  ]);
+
+  let startIndex = 0;
+  while (startIndex < parts.length - 1 && honorifics.has(parts[startIndex])) {
+    startIndex++;
+  }
+
+  const remainingParts = parts.slice(startIndex);
+  if (remainingParts.length <= 1) {
+    return remainingParts[0] || parts[parts.length - 1];
+  }
+
+  if (remainingParts.length === 2) {
+    return remainingParts[1];
+  }
+
+  // Compound family name suffixes/prefixes: e.g. "پور احمدی", "حسینی زاده", "مرادی نیا", "اصل تبریزی"
+  const compoundMarkers = new Set([
+    'پور', 'زاده', 'نیا', 'اصل', 'تبار', 'وند', 'مقدم', 'دوست', 'نژاد', 'راد', 'کیا', 'بخش'
+  ]);
+
+  const secondToLast = remainingParts[remainingParts.length - 2];
+  if (compoundMarkers.has(secondToLast)) {
+    return remainingParts.slice(-2).join(' ');
+  }
+
+  // Compound first names: e.g. "محمد رضا حسینی" -> family is "حسینی"
+  const compoundFirstNames = new Set([
+    'محمد', 'علی', 'امیر', 'غلام', 'رضا', 'عبد', 'حسین', 'مهدی', 'فاطمه', 'زهرا', 'امیرمحمد', 'احمدرضا'
+  ]);
+  if (compoundFirstNames.has(remainingParts[0]) && remainingParts.length >= 3) {
+    return remainingParts.slice(2).join(' ');
+  }
+
+  return remainingParts.slice(1).join(' ');
+}
+
+/**
+ * Compare two Persian strings alphabetically with proper Arabic/Persian letter normalization (ي -> ی, ك -> ک, etc.)
+ */
+export function comparePersianAlphabetical(a: string, b: string): number {
+  const normA = (a || '').replace(/ي/g, 'ی').replace(/ك/g, 'ک').replace(/[آأإ]/g, 'ا').trim();
+  const normB = (b || '').replace(/ي/g, 'ی').replace(/ك/g, 'ک').replace(/[آأإ]/g, 'ا').trim();
+  return normA.localeCompare(normB, 'fa', { sensitivity: 'base' });
+}
+
+/**
+ * Sort an array of voter-like objects alphabetically by Persian family name
+ */
+export function sortVotersByFamilyName<T extends { fullName: string; rowNumber?: number }>(voters: T[]): T[] {
+  return [...voters].sort((a, b) => {
+    const famA = extractPersianFamilyName(a.fullName);
+    const famB = extractPersianFamilyName(b.fullName);
+    const cmp = comparePersianAlphabetical(famA, famB);
+    if (cmp !== 0) return cmp;
+    const fullCmp = comparePersianAlphabetical(a.fullName, b.fullName);
+    if (fullCmp !== 0) return fullCmp;
+    return (a.rowNumber || 0) - (b.rowNumber || 0);
+  });
+}
+

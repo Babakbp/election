@@ -11,6 +11,7 @@ export type StationRole = 'master' | 'checkin' | 'kiosk' | 'projector';
 export type OperatingMode = 'STANDALONE' | 'NETWORK_MULTI';
 
 export interface SyncMessage {
+  msgId?: string;
   type: 
     | 'VOTER_CHECK_IN'
     | 'VOTER_UNDO_CHECK_IN'
@@ -50,6 +51,7 @@ class SyncEngine {
   private isConnecting = false;
   private reconnectTimer: any = null;
   private heartbeatTimer: any = null;
+  private processedMsgIds: Set<string> = new Set();
 
   constructor() {
     this.stationId = 'station_' + Math.random().toString(36).substring(2, 9);
@@ -140,8 +142,10 @@ class SyncEngine {
     };
   }
 
-  public broadcast(type: SyncMessage['type'], payload?: any) {
+  public broadcast(type: SyncMessage['type'], payload?: any, customMsgId?: string) {
+    const msgId = customMsgId || `${this.stationId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const msg: SyncMessage = {
+      msgId,
       type,
       senderId: this.stationId,
       senderRole: this.role,
@@ -149,6 +153,9 @@ class SyncEngine {
       timestamp: new Date().toISOString(),
       payload,
     };
+
+    // Mark as processed locally so we never reprocess our own message if reflected back
+    this.processedMsgIds.add(msgId);
 
     // 1. Broadcast locally via BroadcastChannel (instant for secondary touch screen/tabs)
     if (this.broadcastChannel) {
@@ -277,6 +284,22 @@ class SyncEngine {
   private handleIncomingMessage(msg: SyncMessage, fromWs: boolean) {
     // Ignore own messages
     if (msg.senderId === this.stationId) return;
+
+    // Deduplicate: if message was already delivered via BroadcastChannel or WebSocket, drop duplicate
+    if (msg.msgId) {
+      if (this.processedMsgIds.has(msg.msgId)) {
+        return;
+      }
+      this.processedMsgIds.add(msg.msgId);
+      // Keep memory footprint bounded
+      if (this.processedMsgIds.size > 2000) {
+        const it = this.processedMsgIds.values();
+        for (let i = 0; i < 400; i++) {
+          const val = it.next().value;
+          if (val) this.processedMsgIds.delete(val);
+        }
+      }
+    }
 
     // Track station presence
     if (msg.senderId) {

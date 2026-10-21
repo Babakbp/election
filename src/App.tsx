@@ -13,7 +13,8 @@ import {
   TieBreakerRule,
   Voter,
   VoterStatus,
-  ArchivedSession
+  ArchivedSession,
+  ElectedRole
 } from './types/election';
 import { 
   createInitialCandidates, 
@@ -30,7 +31,8 @@ import {
   computeSHA256, 
   toPersianDigits, 
   generateValidSyntheticNationalId, 
-  maskNationalId 
+  maskNationalId,
+  isVoterAgeEligible
 } from './utils/persian';
 import { audioFeedback } from './utils/audioFeedback';
 
@@ -52,9 +54,6 @@ import { ManualTallySheetModal } from './components/ManualTallySheetModal';
 import { ElectionGuideModal } from './components/ElectionGuideModal';
 import { SessionsArchiveTab } from './components/SessionsArchiveTab';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { TouchVotingKiosk } from './components/TouchVotingKiosk';
-import { VoterCheckinTerminal } from './components/VoterCheckinTerminal';
-import { NetworkHubModal } from './components/NetworkHubModal';
 import { syncEngine, OperatingMode, StationRole, SyncMessage } from './utils/syncEngine';
 import { getAppPasswordInfo, getLicenseStatus, CREATOR_NAME, CREATOR_EMAIL } from './utils/license';
 import { archiveSession, getArchivedSessions } from './utils/fileBackupStorage';
@@ -177,18 +176,50 @@ export default function App() {
   const [licenseData, setLicenseData] = useState(() => getLicenseStatus());
   const [flashMessage, setFlashMessage] = useState<string | null>(null);
 
-  // Operating mode & Station Role
-  const [operatingMode, setOperatingMode] = useState<OperatingMode>(() => syncEngine.getMode());
+  // Operating mode & Station Role (Only Master and Projector retained)
+  const [operatingMode, setOperatingMode] = useState<OperatingMode>('STANDALONE');
   const [stationRole, setStationRole] = useState<StationRole>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      const s = params.get('station');
-      if (s === 'kiosk' || s === 'checkin' || s === 'projector') return s as StationRole;
+      let s = params.get('station');
+      if (!s && window.location.hash) {
+        const hash = window.location.hash;
+        const q = hash.includes('?') ? hash.split('?')[1] : hash.replace(/^#/, '');
+        s = new URLSearchParams(q).get('station');
+      }
+      if (s === 'projector') return 'projector';
     }
     return 'master';
   });
-  const [isNetworkHubModalOpen, setIsNetworkHubModalOpen] = useState(false);
   const processedVoteIdsRef = useRef<Set<string>>(new Set());
+
+  // Listen to popstate and hashchange events
+  useEffect(() => {
+    const checkRoleFromLocation = () => {
+      if (typeof window === 'undefined') return;
+      const params = new URLSearchParams(window.location.search);
+      let s = params.get('station');
+      if (!s && window.location.hash) {
+        const hash = window.location.hash;
+        const q = hash.includes('?') ? hash.split('?')[1] : hash.replace(/^#/, '');
+        s = new URLSearchParams(q).get('station');
+      }
+      if (s === 'projector') {
+        setStationRole('projector');
+        syncEngine.setRole('projector');
+      } else {
+        setStationRole('master');
+        syncEngine.setRole('master');
+      }
+    };
+
+    window.addEventListener('popstate', checkRoleFromLocation);
+    window.addEventListener('hashchange', checkRoleFromLocation);
+    return () => {
+      window.removeEventListener('popstate', checkRoleFromLocation);
+      window.removeEventListener('hashchange', checkRoleFromLocation);
+    };
+  }, []);
 
   // Sync to local storage
   useEffect(() => {
@@ -456,24 +487,38 @@ export default function App() {
 
       // 3.01 Vote Increment from Projector View or another connected station
       if (msg.type === 'CANDIDATE_VOTE_INCREMENT' && msg.payload) {
-        const { candidateId, amount, candidateName, candidateNumber, operatorName } = msg.payload;
+        const { candidateId, amount, candidateName, candidateNumber, operatorName, voteId, soundPlayedOnSender, newVotes } = msg.payload;
+
+        // Prevent duplicate processing from WebSocket / BroadcastChannel dual reception
+        if (voteId && processedVoteIdsRef.current.has(voteId)) {
+          return;
+        }
+        if (voteId) {
+          processedVoteIdsRef.current.add(voteId);
+        }
+
         setCandidates((prev) =>
-          prev.map((c) => (c.id === candidateId ? { ...c, votes: c.votes + (amount || 1) } : c))
+          prev.map((c) => {
+            if (c.id === candidateId) {
+              const targetVotes = typeof newVotes === 'number' ? newVotes : c.votes + (amount || 1);
+              return { ...c, votes: targetVotes };
+            }
+            return c;
+          })
         );
+
         if (stationRole === 'master') {
-          audioFeedback.playVoteCast();
-          showFlash(`یک رأی جدید برای «${candidateName || 'کاندیدا'}» از صفحه پروژکتور ثبت شد.`);
           await appendAuditEvent({
-            operatorName: operatorName || 'اپراتور ثبت سریع پروژکتور',
+            operatorName: operatorName || 'اپراتور ثبت سریع',
             operatorRole: 'شمارشگر حضوری سالن',
             candidateId,
             candidateName,
             candidateNumber,
             actionType: 'VOTE_INCREMENT',
             previousValue: null,
-            newValue: 'ثبت سریع از صفحه پروژکتور',
+            newValue: `ثبت رأی (${typeof newVotes === 'number' ? newVotes : 'افزایش'})`,
             delta: amount || 1,
-            reason: 'ثبت رأی مستقیم دستی/بارکدخوان از نمایشگر سالن',
+            reason: 'ثبت رأی حضوری سالن اخذ رأی',
           });
         }
       }
@@ -650,12 +695,21 @@ export default function App() {
     const cand = candidates.find((c) => c.id === candidateId);
     if (!cand) return;
 
-    const prevVotes = cand.votes;
-    const newVotes = prevVotes + amount;
+    const voteId = `vote_inc_${candidateId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    processedVoteIdsRef.current.add(voteId);
 
+    let finalNewVotes = cand.votes + amount;
     setCandidates((prev) =>
-      prev.map((c) => (c.id === candidateId ? { ...c, votes: newVotes } : c))
+      prev.map((c) => {
+        if (c.id === candidateId) {
+          finalNewVotes = c.votes + amount;
+          return { ...c, votes: finalNewVotes };
+        }
+        return c;
+      })
     );
+
+    const prevVotes = cand.votes;
 
     await appendAuditEvent({
       operatorName: currentOperator.name,
@@ -665,24 +719,24 @@ export default function App() {
       candidateNumber: cand.candidateNumber,
       actionType: 'VOTE_INCREMENT',
       previousValue: prevVotes,
-      newValue: newVotes,
+      newValue: finalNewVotes,
       delta: amount,
       reason: amount === 1 
         ? 'قرائت تعرفه و شمارش حضوری برگه رأی' 
         : `ثبت بسته ${toPersianDigits(amount)} تایی تعرفه با تایید ناظران`,
     });
 
-    showFlash(`رأی ${cand.name} افزایش یافت (+${toPersianDigits(amount)})`);
-
-    // Broadcast across windows / WiFi connected stations
+    // Broadcast across windows / WiFi connected stations with unique voteId and soundPlayedOnSender flag
     syncEngine.broadcast('CANDIDATE_VOTE_INCREMENT', {
+      voteId,
       candidateId: cand.id,
       amount,
-      newVotes,
+      newVotes: finalNewVotes,
       candidateName: cand.name,
       candidateNumber: cand.candidateNumber,
       operatorName: currentOperator.name,
-    });
+      soundPlayedOnSender: true,
+    }, voteId);
   };
 
   // Multiple Votes Cast from Touchscreen Kiosk
@@ -991,12 +1045,48 @@ export default function App() {
     if (session.status === 'LOCKED_FINAL') return;
     setSession((s) => ({ ...s, ...updated }));
 
+    // If age restriction rules were updated, re-evaluate existing voters
+    if (
+      updated.hasAgeRestriction !== undefined ||
+      updated.minBirthDate !== undefined ||
+      updated.maxBirthDate !== undefined ||
+      updated.minAge !== undefined ||
+      updated.maxAge !== undefined
+    ) {
+      const nextHasAgeRestriction = updated.hasAgeRestriction !== undefined ? updated.hasAgeRestriction : session.hasAgeRestriction;
+      const nextMinBirthDate = updated.minBirthDate !== undefined ? updated.minBirthDate : session.minBirthDate;
+      const nextMaxBirthDate = updated.maxBirthDate !== undefined ? updated.maxBirthDate : session.maxBirthDate;
+      const nextMinAge = updated.minAge !== undefined ? updated.minAge : session.minAge;
+      const nextMaxAge = updated.maxAge !== undefined ? updated.maxAge : session.maxAge;
+
+      setVoters((prevVoters) =>
+        prevVoters.map((v) => {
+          const elig = isVoterAgeEligible(v.birthDate, nextHasAgeRestriction, {
+            minBirthDate: nextMinBirthDate,
+            maxBirthDate: nextMaxBirthDate,
+            minAge: nextMinAge,
+            maxAge: nextMaxAge,
+          });
+          return {
+            ...v,
+            isAgeEligible: elig.isEligible,
+            disqualificationReason:
+              !elig.isEligible && nextHasAgeRestriction
+                ? elig.reason || 'خارج از بازه سنی مصوب حوزه'
+                : v.isDisqualified
+                ? v.disqualificationReason
+                : undefined,
+          };
+        })
+      );
+    }
+
     await appendAuditEvent({
       operatorName: currentOperator.name,
       operatorRole: currentOperator.role,
       actionType: 'SESSION_STATE_CHANGE',
       previousValue: null,
-      newValue: 'بروزرسانی مشخصات شعبه',
+      newValue: 'بروزرسانی مشخصات شعبه و شرایط سنی',
       delta: null,
       reason,
     });
@@ -1116,6 +1206,39 @@ export default function App() {
     }
 
     showFlash('صورتجلسه انتخابات با موفقیت قفل گردید و در بایگانی دائمی ذخیره شد.');
+  };
+
+  // Update Candidate Elected Roles (Principal vs Alternate / اصلی و علی‌البدل)
+  const handleUpdateCandidateElectedRoles = async (
+    roles: Record<string, ElectedRole>,
+    principalCount: number,
+    alternateCount: number
+  ) => {
+    setSession((prev) => ({
+      ...prev,
+      principalSeatsCount: principalCount,
+      alternateSeatsCount: alternateCount,
+      candidateElectedRoles: roles,
+    }));
+
+    setCandidates((prev) =>
+      prev.map((c) => ({
+        ...c,
+        electedRole: roles[c.id] || 'NONE',
+      }))
+    );
+
+    await appendAuditEvent({
+      operatorName: currentOperator.name || 'اپراتور سامانه',
+      operatorRole: currentOperator.role || 'مسئول شعبه',
+      actionType: 'CANDIDATE_UPDATED',
+      previousValue: `اعضای اصلی: ${toPersianDigits(session.principalSeatsCount ?? 5)}، علی‌البدل: ${toPersianDigits(session.alternateSeatsCount ?? 2)}`,
+      newValue: `اعضای اصلی: ${toPersianDigits(principalCount)}، علی‌البدل: ${toPersianDigits(alternateCount)}`,
+      delta: null,
+      reason: `تعیین و بروزرسانی وضعیت منتخبین (اعضای اصلی و علی‌البدل) در صورتجلسه رسمی`,
+    });
+
+    showFlash('وضعیت اعضای اصلی و علی‌البدل با موفقیت در صورتجلسه ثبت شد.');
   };
 
   // Explicitly Archive Current Session
@@ -1284,6 +1407,14 @@ export default function App() {
     const target = voters.find(v => v.id === voterId);
     if (!target) return;
 
+    // Check if voter is disqualified or ineligible by age
+    const isDisq = target.isDisqualified || (session.hasAgeRestriction && target.isAgeEligible === false);
+    if (isDisq && (newStatus === 'BALLOT_DELIVERED' || newStatus === 'VOTED')) {
+      audioFeedback.playNotFoundWarning();
+      showFlash(`⛔ خطا: رأی‌دهنده «${target.fullName}» دارای تیک عدم احراز شرایط است و مجاز به اخذ تعرفه یا رأی‌دهی نمی‌باشد.`);
+      return;
+    }
+
     const nowJalali = formatJalali(new Date(), true);
 
     setVoters(prev => prev.map(v => {
@@ -1340,6 +1471,13 @@ export default function App() {
     const target = voters.find(v => v.id === voterId);
     if (!target) return;
     
+    const isDisq = target.isDisqualified || (session.hasAgeRestriction && target.isAgeEligible === false);
+    if (isDisq) {
+      audioFeedback.playNotFoundWarning();
+      showFlash(`⛔ خطا: رأی‌دهنده «${target.fullName}» فاقد شرایط سنی مجاز است و امکان اخذ رأی ندارد.`);
+      return;
+    }
+
     const currentStatus: VoterStatus = target.status 
       ? target.status 
       : (target.hasVoted ? 'VOTED' : (target.ballotDeliveredAt ? 'BALLOT_DELIVERED' : 'NOT_CHECKED_IN'));
@@ -1446,42 +1584,7 @@ export default function App() {
     showFlash('دوره قبلی در بایگانی ذخیره شد و جلسه جدید با موفقیت آغاز گردید.');
   };
 
-  // 1. Dedicated Kiosk Screen (Touchscreen for Voters)
-  if (stationRole === 'kiosk') {
-    return (
-      <ErrorBoundary fallbackTitle="خطا در اجرای کیوسک لمسی اخذ رأی">
-        <TouchVotingKiosk
-          session={session}
-          candidates={candidates}
-          onVoteCast={(candId) => handleIncrementVote(candId, 1)}
-          onMultipleVotesCast={handleMultipleVotesCastFromKiosk}
-          onExitKiosk={() => handleSelectStationRole('master')}
-        />
-      </ErrorBoundary>
-    );
-  }
-
-  // 2. Dedicated Check-in Terminal Screen (Laptop 2 for Registration Desk)
-  if (stationRole === 'checkin') {
-    return (
-      <ErrorBoundary fallbackTitle="خطا در اجرای باجه ثبت ورود واجدین شرایط">
-        <VoterCheckinTerminal
-          session={session}
-          voters={voters}
-          currentOperator={currentOperator}
-          isLocked={session.status === 'LOCKED_FINAL'}
-          onToggleVoterStatus={handleToggleVoterStatus}
-          onSetVoterStatus={handleSetVoterStatus}
-          onDeleteVoter={handleDeleteSingleVoter}
-          onClearAllVoters={handleClearAllVoters}
-          onAddVoter={handleAddVoterQuick}
-          onExitTerminal={() => handleSelectStationRole('master')}
-        />
-      </ErrorBoundary>
-    );
-  }
-
-  // 3. Dedicated Live Projector View
+  // Dedicated Live Projector View
   if (stationRole === 'projector') {
     return (
       <ErrorBoundary fallbackTitle="خطا در نمایش پروژکتور سالن">
@@ -1494,8 +1597,6 @@ export default function App() {
             recentAuditEvents={auditEvents.slice(0, 6)}
             totalVotes={totalVotes}
             totalValidVotes={totalValidVotes}
-            onIncrementVote={handleIncrementVote}
-            isLocked={session.status === 'LOCKED_FINAL'}
           />
         </div>
       </ErrorBoundary>
@@ -1519,50 +1620,16 @@ export default function App() {
         onOpenGuide={() => setIsGuideModalOpen(true)}
         onOpenBackup={() => setIsBackupModalOpen(true)}
         onNavigateToArchive={() => setActiveTab('ARCHIVE')}
-        onOpenNetworkHub={() => setIsNetworkHubModalOpen(true)}
-        operatingMode={operatingMode}
         archivedCount={archivedSessions.length}
+        onSelectStationRole={handleSelectStationRole}
       />
 
-      {/* Network Multi-Station Mode Active Notice */}
-      {operatingMode === 'NETWORK_MULTI' && (
-        <div className="no-print print:hidden bg-gradient-to-r from-indigo-950/90 via-slate-900 to-indigo-950/90 border-b border-indigo-500/30 px-4 py-2 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-indigo-200">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-            </span>
-            <span className="font-bold">روش ۲: شبکه محلی و چندکاربره فعال است</span>
-            <span className="text-slate-400 hidden md:inline">| لپ‌تاپ ۲ پذیرش و کیوسک لمسی آماده همگام‌سازی لحظه‌ای هستند</span>
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap justify-end">
-            <button
-              onClick={() => handleSelectStationRole('checkin')}
-              className="px-2.5 py-1 rounded-lg bg-indigo-600/40 hover:bg-indigo-600 text-indigo-100 border border-indigo-500/40 font-bold transition-colors"
-            >
-              لپ‌تاپ ۲: ثبت ورود
-            </button>
-            <button
-              onClick={() => handleSelectStationRole('kiosk')}
-              className="px-2.5 py-1 rounded-lg bg-emerald-600/40 hover:bg-emerald-600 text-emerald-100 border border-emerald-500/40 font-bold transition-colors"
-            >
-              کیوسک لمسی رأی
-            </button>
-            <button
-              onClick={() => setIsNetworkHubModalOpen(true)}
-              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-medium transition-colors"
-            >
-              کیوآرکد و تنظیمات
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Flash Banner if any */}
+      {/* Floating Flash Toast Overlay (Zero Layout Shift) */}
       {flashMessage && (
-        <div className="no-print print:hidden bg-emerald-600/90 text-white text-xs font-bold py-2 px-4 text-center sticky top-[61px] z-30 shadow-md backdrop-blur-sm animate-in fade-in slide-in-from-top-2">
-          {flashMessage}
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none no-print print:hidden animate-in fade-in zoom-in-95">
+          <div className="bg-emerald-600/95 text-white text-xs font-bold py-2.5 px-5 rounded-2xl shadow-2xl border border-emerald-400/50 backdrop-blur-md">
+            {flashMessage}
+          </div>
         </div>
       )}
 
@@ -1820,6 +1887,7 @@ export default function App() {
             onSavePersonSignature={handleSavePersonSignature}
             onLockSessionFinal={handleLockSessionFinal}
             onExportExcel={handleExportExcel}
+            onUpdateCandidateElectedRoles={handleUpdateCandidateElectedRoles}
           />
         )}
 
@@ -1886,8 +1954,6 @@ export default function App() {
         recentAuditEvents={auditEvents}
         totalVotes={totalVotes}
         totalValidVotes={totalValidVotes}
-        onIncrementVote={handleIncrementVote}
-        isLocked={session.status === 'LOCKED_FINAL'}
       />
 
       {/* Backup and Restore Modal */}
@@ -1964,15 +2030,6 @@ export default function App() {
           setIsGuideModalOpen(false);
           setIsSecurityModalOpen(true);
         }}
-      />
-
-      {/* Network & WiFi Station Selector Modal (روش سابق / روش شبکه و کیوسک) */}
-      <NetworkHubModal
-        isOpen={isNetworkHubModalOpen}
-        onClose={() => setIsNetworkHubModalOpen(false)}
-        currentMode={operatingMode}
-        onSelectMode={handleSelectMode}
-        onSelectStationRole={handleSelectStationRole}
       />
     </div>
   );

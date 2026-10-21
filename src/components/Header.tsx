@@ -30,9 +30,8 @@ interface HeaderProps {
   onOpenGuide?: () => void;
   onOpenBackup?: () => void;
   onNavigateToArchive?: () => void;
-  onOpenNetworkHub?: () => void;
-  operatingMode?: 'STANDALONE' | 'NETWORK_MULTI';
   archivedCount?: number;
+  onSelectStationRole?: (role: 'master' | 'projector') => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -48,9 +47,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenGuide,
   onOpenBackup,
   onNavigateToArchive,
-  onOpenNetworkHub,
-  operatingMode,
   archivedCount,
+  onSelectStationRole,
 }) => {
   const [timeString, setTimeString] = useState<string>('');
 
@@ -184,9 +182,8 @@ export const Header: React.FC<HeaderProps> = ({
               onExportExcel={onExportExcel}
               onOpenManualTallySheet={onOpenManualTallySheet}
               onOpenSecurity={onOpenSecurity}
-              onOpenNetworkHub={onOpenNetworkHub}
-              operatingMode={operatingMode}
               archivedCount={archivedCount}
+              onSelectStationRole={onSelectStationRole}
             />
 
           </div>

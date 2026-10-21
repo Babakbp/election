@@ -17,23 +17,37 @@ class AudioFeedbackService {
     return this.ctx;
   }
 
+  private lastVoteSoundTime = 0;
+
   playVoteIncrement() {
+    const nowMs = Date.now();
+    // Strict 500ms debounce: guarantees only ONE beep can ever sound within half a second
+    if (nowMs - this.lastVoteSoundTime < 500) {
+      return;
+    }
+    this.lastVoteSoundTime = nowMs;
+
     try {
       const ctx = this.getContext();
       if (!ctx) return;
+      const now = ctx.currentTime;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
-      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.08); // A5
 
-      gain.gain.setValueAtTime(0.12, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.09);
+      // Crisp, clean, pleasant single beep tone (880 Hz pure tone, no frequency slide or chirp)
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, now);
+
+      // Smooth anti-click envelope: 5ms attack, 60ms sustain, 15ms decay to zero
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(0.18, now + 0.005);
+      gain.gain.setValueAtTime(0.18, now + 0.065);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
 
       osc.connect(gain);
       gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.09);
+      osc.start(now);
+      osc.stop(now + 0.085);
     } catch {
       // Audio not permitted or failed
     }

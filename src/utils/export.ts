@@ -55,7 +55,7 @@ export function exportElectionToExcel(
   const summaryWs = XLSX.utils.aoa_to_sheet(summaryData);
   XLSX.utils.book_append_sheet(wb, summaryWs, 'خلاصه آمار');
 
-  // Sheet 2: Candidate Rankings & Votes
+  // Sheet 2: Candidate Rankings & Votes (With Principal/Alternate Role)
   const candidatesHeaders = [
     'رتبه',
     'کد نامزدی',
@@ -64,18 +64,32 @@ export function exportElectionToExcel(
     'ائتلاف / وابستگی',
     'تعداد آرا',
     'درصد از آرای صحیح',
+    'وضعیت در صورتجلسه (منتخب)',
     'وضعیت و ملاحظات تساوی',
   ];
-  const candidatesRows = rankedCandidates.map((c) => [
-    c.rank,
-    c.candidateNumber,
-    c.name,
-    c.nationalIdMasked,
-    c.affiliation,
-    c.votes,
-    `${c.percentage}%`,
-    c.isTied ? (c.tieBreakerAppliedReason ?? 'تساوی آرا') : 'اکثریت قانونی',
-  ]);
+  const candidatesRows = rankedCandidates.map((c, idx) => {
+    const role = session.candidateElectedRoles?.[c.id] || c.electedRole;
+    let roleText = 'عدم انتخاب';
+    const pCount = session.principalSeatsCount ?? 5;
+    const aCount = session.alternateSeatsCount ?? 2;
+    if (role === 'PRINCIPAL' || (!role && idx < pCount)) {
+      roleText = 'عضو اصلی هیئت / شورا';
+    } else if (role === 'ALTERNATE' || (!role && idx < pCount + aCount)) {
+      roleText = 'عضو علی‌البدل';
+    }
+
+    return [
+      c.rank,
+      c.candidateNumber,
+      c.name,
+      c.nationalIdMasked,
+      c.affiliation,
+      c.votes,
+      `${c.percentage}%`,
+      roleText,
+      c.isTied ? (c.tieBreakerAppliedReason ?? 'تساوی آرا') : 'اکثریت قانونی',
+    ];
+  });
   const candidatesWs = XLSX.utils.aoa_to_sheet([candidatesHeaders, ...candidatesRows]);
   XLSX.utils.book_append_sheet(wb, candidatesWs, 'نتایج نامزدها');
 
@@ -150,15 +164,18 @@ export function exportVotersTemplateToExcel() {
  */
 export function exportVotersListToExcel(voters: Voter[], stationNumber: string) {
   const wb = XLSX.utils.book_new();
-  const headers = ['ردیف', 'نام و نام خانوادگی', 'کد ملی', 'شماره تماس', 'تاریخ تولد شمسی', 'سن (سال)', 'احراز رده سنی', 'وضعیت', 'زمان تحویل تعرفه', 'زمان ثبت رأی'];
+  const headers = ['ردیف', 'نام و نام خانوادگی', 'کد ملی', 'شماره تماس', 'تاریخ تولد شمسی', 'سن (سال)', 'احراز شرایط سنی', 'علت عدم احراز', 'وضعیت تعرفه', 'زمان تحویل تعرفه', 'زمان ثبت رأی'];
   const rows = voters.map((v) => {
     let statusText = 'مراجعه نکرده';
-    if (v.status === 'VOTED' || v.hasVoted) {
+    if (v.isDisqualified || v.isAgeEligible === false) {
+      statusText = 'غیرمجاز برای اخذ رأی (عدم احراز)';
+    } else if (v.status === 'VOTED' || v.hasVoted) {
       statusText = 'رای داده شد';
     } else if (v.status === 'BALLOT_DELIVERED' || v.ballotDeliveredAt) {
       statusText = 'تعرفه تحویل شد';
     }
-    const ageEligibleText = v.isAgeEligible === false ? 'عدم احراز رده سنی' : 'واجد شرایط سنی';
+    const isDisq = v.isDisqualified || v.isAgeEligible === false;
+    const ageEligibleText = isDisq ? 'عدم احراز شرایط سنی' : 'واجد شرایط مجاز';
     return [
       v.rowNumber,
       v.fullName,
@@ -167,6 +184,7 @@ export function exportVotersListToExcel(voters: Voter[], stationNumber: string) 
       v.birthDate ?? '—',
       v.age !== undefined ? v.age : '—',
       ageEligibleText,
+      v.disqualificationReason ?? (isDisq ? 'خارج از بازه سنی مجاز' : '—'),
       statusText,
       v.ballotDeliveredAt ?? '—',
       v.votedAt ?? '—',

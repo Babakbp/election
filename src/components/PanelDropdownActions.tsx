@@ -15,7 +15,10 @@ import {
   Laptop,
   Network,
   ExternalLink,
-  Monitor
+  Monitor,
+  Copy,
+  Check,
+  ShieldAlert
 } from 'lucide-react';
 import { toPersianDigits } from '../utils/persian';
 
@@ -27,8 +30,7 @@ export interface PanelDropdownActionsProps {
   onExportExcel?: () => void;
   onOpenManualTallySheet?: () => void;
   onOpenSecurity?: () => void;
-  onOpenNetworkHub?: () => void;
-  operatingMode?: 'STANDALONE' | 'NETWORK_MULTI';
+  onSelectStationRole?: (role: 'master' | 'projector') => void;
   archivedCount?: number;
   className?: string;
   isHeader?: boolean;
@@ -42,17 +44,15 @@ export const PanelDropdownActions: React.FC<PanelDropdownActionsProps> = ({
   onExportExcel,
   onOpenManualTallySheet,
   onOpenSecurity,
-  onOpenNetworkHub,
-  operatingMode = 'STANDALONE',
+  onSelectStationRole,
   archivedCount = 0,
   className = '',
   isHeader = false,
 }) => {
-  const [openDropdown, setOpenDropdown] = useState<'backup' | 'tools' | 'projector' | null>(null);
+  const [openDropdown, setOpenDropdown] = useState<'backup' | 'tools' | null>(null);
 
   const backupRef = useRef<HTMLDivElement>(null);
   const toolsRef = useRef<HTMLDivElement>(null);
-  const projectorRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -69,13 +69,6 @@ export const PanelDropdownActions: React.FC<PanelDropdownActionsProps> = ({
         openDropdown === 'tools' &&
         toolsRef.current &&
         !toolsRef.current.contains(target)
-      ) {
-        setOpenDropdown(null);
-      }
-      if (
-        openDropdown === 'projector' &&
-        projectorRef.current &&
-        !projectorRef.current.contains(target)
       ) {
         setOpenDropdown(null);
       }
@@ -132,93 +125,26 @@ export const PanelDropdownActions: React.FC<PanelDropdownActionsProps> = ({
     <div className={`flex items-center gap-2 sm:gap-3 flex-wrap ${className}`} dir="rtl">
       
       {/* ====================================================================
-          1. کلید پروژکتور سالن: همراه منوی اختصاصی تفکیک مانیتور و پروژکتور
+          1. کلید پروژکتور سالن: ورود مستقیم بدون معطلی و بدون پنل سوالات
       ===================================================================== */}
       {onOpenProjector && (
-        <div className="relative" ref={projectorRef}>
-          <button
-            type="button"
-            onClick={() => setOpenDropdown(prev => prev === 'projector' ? null : 'projector')}
-            title="نمایشگر زنده مخصوص ویدئو پروژکتور سالن (کلید میانبر Win + P)"
-            className={`bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-700 hover:from-indigo-500 hover:to-blue-500 text-white rounded-xl font-black flex items-center gap-1.5 shadow-lg shadow-indigo-950/60 border border-indigo-400/60 hover:scale-105 active:scale-95 transition-all transform ${
-              isHeader 
-                ? 'px-3.5 py-2 text-xs sm:text-sm ring-2 ring-indigo-500/40' 
-                : 'px-5 py-2.5 text-sm sm:text-base ring-2 ring-indigo-500/50'
-            }`}
-          >
-            <Tv className={isHeader ? 'w-4 h-4 sm:w-5 sm:h-5 text-indigo-100' : 'w-5 h-5 text-indigo-100'} />
-            <span>پروژکتور سالن</span>
-            <ChevronDown className={`w-3.5 h-3.5 text-indigo-200 transition-transform ${openDropdown === 'projector' ? 'rotate-180' : ''}`} />
-            <span className="relative flex h-2.5 w-2.5 mr-0.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-            </span>
-          </button>
-
-          {/* Projector Dropdown Menu */}
-          {openDropdown === 'projector' && (
-            <div className="absolute left-0 mt-2 w-80 bg-slate-900 border-2 border-indigo-500/60 rounded-2xl shadow-2xl p-3 z-50 animate-in fade-in zoom-in-95 space-y-2 text-right">
-              <div className="border-b border-slate-800 pb-2 px-1">
-                <span className="text-xs font-black text-white block">پروژکتور زنده سالن اخذ رأی</span>
-                <span className="text-[11px] text-slate-400 block mt-0.5">تفکیک نمایشگر سالن از مانیتور کاربری اپراتور</span>
-              </div>
-
-              {/* Option 1: Open in New Independent Window (Recommended) */}
-              <button
-                type="button"
-                onClick={() => {
-                  window.open('/?station=projector', '_blank');
-                  setOpenDropdown(null);
-                }}
-                className="w-full text-right p-2.5 rounded-xl bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-500/40 text-white flex items-start gap-2.5 transition group"
-              >
-                <div className="p-2 bg-indigo-600 rounded-lg text-white flex-shrink-0 mt-0.5 group-hover:scale-110 transition-transform">
-                  <ExternalLink className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-1.5 font-bold text-xs text-indigo-200">
-                    <span>۱. باز کردن در پنجره مستقل (توصیه شده)</span>
-                    <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-black">پروژکتور</span>
-                  </div>
-                  <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
-                    صفحه پروژکتور در پنجره جداگانه باز می‌شود تا به پرده سالن بکشید؛ صفحه لپ‌تاپ شما برای ثبت آرا آزاد می‌ماند.
-                  </p>
-                </div>
-              </button>
-
-              {/* Option 2: Preview in current tab */}
-              <button
-                type="button"
-                onClick={() => {
-                  onOpenProjector();
-                  setOpenDropdown(null);
-                }}
-                className="w-full text-right p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-200 flex items-start gap-2.5 transition border border-slate-700/80"
-              >
-                <div className="p-2 bg-slate-700 rounded-lg text-slate-300 flex-shrink-0 mt-0.5">
-                  <Tv className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="font-bold text-xs text-slate-100">۲. پیش‌نمایش در همین صفحه</div>
-                  <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
-                    نمایش تمام‌صفحه روی همین سیستم (جهت مشاهده نتایج و تست ظاهر صفحه پروژکتور).
-                  </p>
-                </div>
-              </button>
-
-              {/* Dual Screen Tip */}
-              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 text-[11px] text-slate-400 leading-relaxed space-y-1">
-                <div className="flex items-center gap-1 text-amber-300 font-bold">
-                  <Monitor className="w-3.5 h-3.5" />
-                  <span>کلید میانبر ویندوز (Windows + P):</span>
-                </div>
-                <p>
-                  در لپ‌تاپ کلید <kbd className="bg-slate-800 px-1 py-0.5 rounded text-amber-300 font-mono">Win + P</kbd> را بزنید، حالت <strong>Extend (توسعه)</strong> را انتخاب کنید، سپس پنجره پروژکتور را به داخل تصویر پروژکتور برده و <kbd className="bg-slate-800 px-1 py-0.5 rounded text-amber-300 font-mono">F11</kbd> بزنید.
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={() => onOpenProjector()}
+          title="ورود مستقیم به نمایشگر زنده ویدئو پروژکتور سالن"
+          className={`bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-700 hover:from-indigo-500 hover:to-blue-500 text-white rounded-xl font-black flex items-center gap-1.5 shadow-lg shadow-indigo-950/60 border border-indigo-400/60 hover:scale-105 active:scale-95 transition-all transform ${
+            isHeader 
+              ? 'px-3.5 py-2 text-xs sm:text-sm ring-2 ring-indigo-500/40' 
+              : 'px-5 py-2.5 text-sm sm:text-base ring-2 ring-indigo-500/50'
+          }`}
+        >
+          <Tv className={isHeader ? 'w-4 h-4 sm:w-5 sm:h-5 text-indigo-100' : 'w-5 h-5 text-indigo-100'} />
+          <span>پروژکتور سالن</span>
+          <span className="relative flex h-2 w-2 mr-0.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          </span>
+        </button>
       )}
 
       {/* ====================================================================
@@ -246,35 +172,6 @@ export const PanelDropdownActions: React.FC<PanelDropdownActionsProps> = ({
           </>
         )}
       </button>
-
-      {/* ====================================================================
-          کلید روش کاربری و شبکه وای‌فای (مستقل / شبکه و کیوسک)
-      ===================================================================== */}
-      {onOpenNetworkHub && (
-        <button
-          type="button"
-          onClick={onOpenNetworkHub}
-          title="تغییر روش کاربری: روش سابق (تک‌سیستمه آفلاین) یا روش شبکه و کیوسک لمسی"
-          className={`px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm border ${
-            operatingMode === 'NETWORK_MULTI'
-              ? 'bg-indigo-950/80 border-indigo-500/60 text-indigo-200 hover:bg-indigo-900 ring-2 ring-indigo-500/30'
-              : 'bg-slate-800/90 hover:bg-slate-700/90 text-slate-300 border border-slate-700/90 hover:text-white'
-          }`}
-        >
-          {operatingMode === 'NETWORK_MULTI' ? (
-            <>
-              <Wifi className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-              <span>شبکه و کیوسک</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-            </>
-          ) : (
-            <>
-              <Laptop className="w-3.5 h-3.5 text-blue-400" />
-              <span>روش: تک‌سیستمه</span>
-            </>
-          )}
-        </button>
-      )}
 
       {/* ====================================================================
           2. کلید کشویی: پشتیبان و خروجی داده (Backup, Archive & Excel)
@@ -475,33 +372,6 @@ export const PanelDropdownActions: React.FC<PanelDropdownActionsProps> = ({
                   </div>
                   <div className="text-[10px] text-slate-400 truncate mt-0.5">
                     تغییر رمز عبور مدیر، قفل خودکار و فعال‌سازی
-                  </div>
-                </div>
-              </button>
-            )}
-
-            {/* Item 4: Network Hub & Station Switcher */}
-            {onOpenNetworkHub && (
-              <button
-                type="button"
-                onClick={() => {
-                  setOpenDropdown(null);
-                  onOpenNetworkHub();
-                }}
-                className="w-full text-right p-2.5 rounded-xl hover:bg-slate-800/90 text-slate-200 hover:text-white flex items-center gap-3 transition group"
-              >
-                <div className="p-2 rounded-lg bg-indigo-950/60 border border-indigo-500/30 text-indigo-400 group-hover:bg-indigo-900/60 transition flex-shrink-0">
-                  <Network className="w-4 h-4" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-bold text-slate-100 group-hover:text-indigo-300 transition flex items-center justify-between">
-                    <span>روش کاربری و شبکه وای‌فای</span>
-                    <span className="text-[10px] text-indigo-400 font-bold px-1.5 py-0.5 rounded bg-indigo-950 border border-indigo-500/30">
-                      {operatingMode === 'NETWORK_MULTI' ? 'شبکه فعال' : 'تک‌سیستمه'}
-                    </span>
-                  </div>
-                  <div className="text-[10px] text-slate-400 truncate mt-0.5">
-                    اتصال لپ‌تاپ ۲ پذیرش، کیوسک لمسی و پروژکتور
                   </div>
                 </div>
               </button>

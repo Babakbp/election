@@ -35,6 +35,8 @@ import {
   Maximize2
 } from 'lucide-react';
 import { toPersianDigits } from '../utils/persian';
+import { getProjectorUrl, tryOpenProjectorWindow } from '../utils/projectorLink';
+import { ProjectorLauncherModal } from './ProjectorLauncherModal';
 
 interface ElectionGuideModalProps {
   isOpen: boolean;
@@ -58,12 +60,17 @@ export const ElectionGuideModal: React.FC<ElectionGuideModalProps> = ({
   const [activeSection, setActiveSection] = useState<'STEPS' | 'PROJECTOR' | 'TOOLS' | 'TIPS'>('STEPS');
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
+  const [isLauncherOpen, setIsLauncherOpen] = useState(false);
 
-  const handleCopyProjectorLink = () => {
-    const url = typeof window !== 'undefined' ? `${window.location.origin}/?station=projector` : '/?station=projector';
-    navigator.clipboard.writeText(url);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2500);
+  const handleCopyProjectorLink = async () => {
+    const url = getProjectorUrl();
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+    } catch {
+      setIsLauncherOpen(true);
+    }
   };
 
   if (!isOpen) return null;
@@ -636,17 +643,24 @@ export const ElectionGuideModal: React.FC<ElectionGuideModalProps> = ({
                 {/* Interactive Action Bar */}
                 <div className="mt-5 pt-4 border-t border-indigo-500/30 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        window.open('/?station=projector', '_blank');
-                        onClose();
+                    <a
+                      href={getProjectorUrl()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => {
+                        const res = tryOpenProjectorWindow();
+                        if (!res.success) {
+                          e.preventDefault();
+                          setIsLauncherOpen(true);
+                        } else {
+                          onClose();
+                        }
                       }}
-                      className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs flex items-center gap-2 transition shadow-lg shadow-indigo-900/40 active:scale-95"
+                      className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs flex items-center gap-2 transition shadow-lg shadow-indigo-900/40 active:scale-95 cursor-pointer"
                     >
                       <ExternalLink className="w-4 h-4" />
                       <span>همین حالا تست کنید: باز کردن پروژکتور در پنجره مستقل</span>
-                    </button>
+                    </a>
 
                     <button
                       type="button"
@@ -970,6 +984,14 @@ export const ElectionGuideModal: React.FC<ElectionGuideModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Projector Launcher & Popup Blocker Fallback Modal */}
+      <ProjectorLauncherModal
+        isOpen={isLauncherOpen}
+        onClose={() => setIsLauncherOpen(false)}
+        wasBlocked={true}
+        onOpenProjectorModal={onOpenProjector}
+      />
     </div>
   );
 };

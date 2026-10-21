@@ -5,7 +5,7 @@ import {
   ElectionSession, 
   Operator 
 } from '../types/election';
-import { toPersianDigits, toEnglishDigits, maskNationalId, formatJalali } from '../utils/persian';
+import { toPersianDigits, toEnglishDigits, maskNationalId, formatJalali, sortVotersByFamilyName } from '../utils/persian';
 import { audioFeedback } from '../utils/audioFeedback';
 import { syncEngine } from '../utils/syncEngine';
 import { 
@@ -36,7 +36,8 @@ import {
   Check,
   X,
   Trash2,
-  FileCheck
+  FileCheck,
+  Ban
 } from 'lucide-react';
 import { VoterStatus } from '../types/election';
 
@@ -221,10 +222,19 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
     });
 
     if (found) {
+      const isDisq = found.isDisqualified || (session?.hasAgeRestriction && found.isAgeEligible === false);
       const isVoted = found.status === 'VOTED' || found.hasVoted;
       const isDelivered = found.status === 'BALLOT_DELIVERED' || (!found.hasVoted && !!found.ballotDeliveredAt);
 
-      if (isVoted) {
+      if (isDisq) {
+        audioFeedback.playNotFoundWarning();
+        setScanResult({
+          type: 'ERROR',
+          voter: found,
+          message: `⛔ عدم احراز شرایط رأی‌دهی! رأی‌دهنده «${found.fullName}» به دلیل ${found.disqualificationReason || 'عدم احراز شرایط سنی حوزه'} غیرمجاز برای اخذ رأی می‌باشد. صدور برگه تعرفه مسدود است.`,
+          timestamp: formatJalali(new Date(), true),
+        });
+      } else if (isVoted) {
         audioFeedback.playDuplicateWarning();
         setScanResult({
           type: 'DUPLICATE',
@@ -330,9 +340,9 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
     }, 100);
   };
 
-  // Filtered voters list
+  // Filtered voters list (Sorted Alphabetically by Family Name)
   const filteredVoters = useMemo(() => {
-    return voters.filter(v => {
+    const list = voters.filter(v => {
       const matchesSearch = 
         !searchQuery ||
         v.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -346,6 +356,8 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
       if (filterState === 'NOT_VOTED') return v.status === 'NOT_CHECKED_IN' || (!v.status && !v.hasVoted && !v.ballotDeliveredAt);
       return true;
     });
+
+    return sortVotersByFamilyName(list);
   }, [voters, searchQuery, filterState]);
 
   const copyMobileLink = () => {
@@ -661,14 +673,15 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
                   </tr>
                 ) : (
                   filteredVoters.map((voter, index) => {
-                    const isVoted = voter.status === 'VOTED' || voter.hasVoted;
-                    const isDelivered = voter.status === 'BALLOT_DELIVERED' || (!voter.hasVoted && !!voter.ballotDeliveredAt);
+                    const isDisq = voter.isDisqualified || (session?.hasAgeRestriction && voter.isAgeEligible === false);
+                    const isVoted = !isDisq && (voter.status === 'VOTED' || voter.hasVoted);
+                    const isDelivered = !isDisq && (voter.status === 'BALLOT_DELIVERED' || (!voter.hasVoted && !!voter.ballotDeliveredAt));
 
                     return (
                       <tr
                         key={voter.id}
                         className={`hover:bg-slate-850 transition-colors ${
-                          isVoted ? 'bg-emerald-950/10' : isDelivered ? 'bg-blue-950/10' : ''
+                          isDisq ? 'bg-rose-950/20 text-rose-300' : isVoted ? 'bg-emerald-950/10' : isDelivered ? 'bg-blue-950/10' : ''
                         }`}
                       >
                         <td className="py-3 px-4 font-mono text-slate-500">{toPersianDigits(voter.rowNumber || index + 1)}</td>
@@ -680,7 +693,19 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
                           {voter.phoneNumber ? toPersianDigits(voter.phoneNumber) : '—'}
                         </td>
                         <td className="py-3 px-4 text-center">
-                          {isVoted ? (
+                          {isDisq ? (
+                            <div className="inline-flex flex-col items-center">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                                <Ban className="w-3.5 h-3.5 text-rose-400" />
+                                <span>عدم احراز شرایط (مسدود)</span>
+                              </span>
+                              {voter.disqualificationReason && (
+                                <span className="text-[10px] text-rose-400/80 mt-0.5 max-w-[150px] truncate" title={voter.disqualificationReason}>
+                                  {voter.disqualificationReason}
+                                </span>
+                              )}
+                            </div>
+                          ) : isVoted ? (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                               <span>رای داده شد {voter.votedAt ? `(${toPersianDigits(voter.votedAt)})` : ''}</span>
@@ -699,19 +724,27 @@ export const VoterCheckinTerminal: React.FC<VoterCheckinTerminalProps> = ({
                         </td>
                         <td className="py-3 px-4 text-center">
                           <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setCurrentVoterForQr(voter);
-                                setIsMobileQrModalOpen(true);
-                              }}
-                              className="p-1.5 rounded-xl bg-slate-800 hover:bg-emerald-500/20 text-slate-400 hover:text-emerald-300 border border-slate-700 transition"
-                              title="تولید و نمایش بارکد اسکن رأی با موبایل برای این شخص"
-                            >
-                              <QrCode className="w-4 h-4" />
-                            </button>
+                            {!isDisq && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCurrentVoterForQr(voter);
+                                  setIsMobileQrModalOpen(true);
+                                }}
+                                className="p-1.5 rounded-xl bg-slate-800 hover:bg-emerald-500/20 text-slate-400 hover:text-emerald-300 border border-slate-700 transition"
+                                title="تولید و نمایش بارکد اسکن رأی با موبایل برای این شخص"
+                              >
+                                <QrCode className="w-4 h-4" />
+                              </button>
+                            )}
 
-                            {!isDelivered && !isVoted && (
+                            {isDisq && (
+                              <span className="px-2.5 py-1 rounded-xl text-xs font-bold bg-rose-950/60 text-rose-400 border border-rose-800/80 cursor-not-allowed">
+                                ⛔ غیرمجاز برای رأی
+                              </span>
+                            )}
+
+                            {!isDisq && !isDelivered && !isVoted && (
                               <button
                                 type="button"
                                 disabled={isLocked}

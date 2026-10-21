@@ -122,6 +122,7 @@
     break-inside: avoid !important;
   }
 
+  /* Official Minutes & Tally Sheet Print Rules */
   #official-minutes-document th,
   #official-minutes-document td,
   #manual-tally-sheet-document th,
@@ -144,15 +145,47 @@
     border-color: #000000 !important;
   }
 
-  #manual-tally-sheet-document .signatures-container {
+  /* Absolute prevention of elements breaking in half */
+  #official-minutes-document tr,
+  #manual-tally-sheet-document tr,
+  #official-minutes-document .print-avoid-break,
+  #official-minutes-document .signatures-container,
+  #official-minutes-document .minutes-section,
+  #official-minutes-document .elected-summary-box,
+  #official-minutes-document .audit-summary-box,
+  #official-minutes-document .signature-card,
+  .print-avoid-break,
+  .page-break-avoid {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
+    -webkit-column-break-inside: avoid !important;
+  }
+
+  /* Deterministic Page Breaks */
+  .print-page-break-before,
+  .print-break-before-page,
+  .page-2-multi {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
+  .print-page-break-after,
+  .print-break-after-page,
+  .page-1-multi {
+    page-break-after: always !important;
+    break-after: page !important;
   }
 
   /* Standard A4 Paper Setup */
   @page {
     size: A4 portrait;
-    margin: 6mm 6mm;
+    margin: 8mm 8mm 8mm 8mm;
+  }
+
+  body {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }
+
 
