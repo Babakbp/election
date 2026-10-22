@@ -176,6 +176,23 @@
     break-after: page !important;
   }
 
+  /* 6. Ballot Paper Print Layout Rules */
+  #ballot-paper-print-document,
+  .ballot-paper-print-root {
+    display: block !important;
+    visibility: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    width: 100% !important;
+    position: relative !important;
+  }
+
+  #ballot-paper-print-document *,
+  .ballot-paper-print-root * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
   /* Standard A4 Paper Setup */
   @page {
     size: A4 portrait;
@@ -185,6 +202,15 @@
   body {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+  }
+}
+
+/* Hide print-only elements on normal display screen */
+@media screen {
+  #ballot-paper-print-document,
+  .ballot-paper-print-root {
+    display: none !important;
+    visibility: hidden !important;
   }
 }
 

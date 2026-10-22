@@ -375,7 +375,7 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
           </div>
           <div className="flex items-center gap-1 text-[11px] font-mono bg-emerald-950/60 text-emerald-300 px-2.5 py-1 rounded-xl border border-emerald-800/60">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-            <span>بارکدخوان آماده اسکن تعرفه (CAND-code)</span>
+            <span>بارکدخوان آماده اسکن تعرفه (کد عددی نامزد)</span>
           </div>
         </div>
 
@@ -548,11 +548,36 @@ export const VotingCounterTab: React.FC<VotingCounterTabProps> = ({
                 isAnimating ? 'ring-2 ring-emerald-400 scale-[1.01] bg-slate-800' : 'border-slate-700/80 hover:border-slate-600'
               }`}
             >
-              {/* Card Top: Rank & Candidate Code */}
+              {/* Card Top: Rank & Candidate Code & Principal/Alternate Status */}
               <div className="flex items-center justify-between mb-2">
-                <div className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[11px] font-bold ${rankInfo.bg}`}>
-                  {rankInfo.icon}
-                  <span>{rankInfo.title}</span>
+                <div className="flex items-center gap-1.5">
+                  <div className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[11px] font-bold ${rankInfo.bg}`}>
+                    {rankInfo.icon}
+                    <span>{rankInfo.title}</span>
+                  </div>
+                  {(() => {
+                    const role = session.candidateElectedRoles?.[candidate.id] || candidate.electedRole;
+                    const pCount = session.principalSeatsCount ?? 5;
+                    const aCount = session.alternateSeatsCount ?? 2;
+                    const isPrincipal = role === 'PRINCIPAL' || (!role && candidate.rank <= pCount);
+                    const isAlternate = role === 'ALTERNATE' || (!role && candidate.rank > pCount && candidate.rank <= pCount + aCount);
+
+                    if (isPrincipal) {
+                      return (
+                        <span className="px-1.5 py-0.5 rounded text-[9.5px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                          اصلی
+                        </span>
+                      );
+                    }
+                    if (isAlternate) {
+                      return (
+                        <span className="px-1.5 py-0.5 rounded text-[9.5px] font-black bg-blue-500/20 text-blue-300 border border-blue-500/40">
+                          علی‌البدل
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
                 <div className="flex items-center gap-1 text-[11px]">
                   <span className="text-slate-400">کد:</span>

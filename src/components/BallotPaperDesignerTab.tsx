@@ -42,9 +42,17 @@ const CODE39_PATTERNS: Record<string, string> = {
   '/': '010100010', '+': '010001010', '%': '000101010', '*': '010010100'
 };
 
-export const BarcodeSvg: React.FC<{ value: string; className?: string }> = ({ value, className = 'h-9' }) => {
-  const clean = value.toUpperCase().replace(/[^0-9A-Z\-.$/+% ]/g, '');
-  const encoded = `*${clean}*`;
+export const BarcodeSvg: React.FC<{ 
+  value: string; 
+  className?: string;
+  showText?: boolean;
+}> = ({ value, className = 'h-9', showText = true }) => {
+  // 1. Convert Persian/Arabic digits to English digits first to prevent stripping!
+  const asciiValue = toEnglishDigits(value || '');
+  // 2. Extract strictly the numeric candidate code
+  const clean = asciiValue.toUpperCase().replace(/[^0-9A-Z]/g, '').trim();
+  const safeCode = clean || '101';
+  const encoded = `*${safeCode}*`;
   
   const narrowW = 1.3;
   const wideW = 3.3;
@@ -71,7 +79,7 @@ export const BarcodeSvg: React.FC<{ value: string; className?: string }> = ({ va
   const totalW = curX + quietZone;
 
   return (
-    <div className="flex flex-col items-center bg-white px-2 py-1 rounded">
+    <div className="flex flex-col items-center bg-white px-1.5 py-0.5 rounded">
       <svg 
         viewBox={`0 0 ${totalW} 36`} 
         className={`w-full max-w-[170px] ${className}`} 
@@ -82,9 +90,11 @@ export const BarcodeSvg: React.FC<{ value: string; className?: string }> = ({ va
           <rect key={idx} x={r.x} y="0" width={r.w} height="36" fill="#000000" />
         ))}
       </svg>
-      <span className="font-mono text-[9px] font-black tracking-widest text-slate-900 mt-0.5 select-all dir-ltr">
-        *{clean}*
-      </span>
+      {showText && (
+        <span className="font-mono text-[9px] font-black tracking-widest text-slate-950 mt-0.5 select-all dir-ltr">
+          {safeCode}
+        </span>
+      )}
     </div>
   );
 };
@@ -128,9 +138,75 @@ export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
 
   const [previewPageIndex, setPreviewPageIndex] = useState(0);
 
-  // Trigger print
+  const [printSuccessMessage, setPrintSuccessMessage] = useState<string | null>(null);
+
+  // Trigger print with dual fallback (standard window.print + isolated print iframe for sandboxed iframes)
   const handlePrint = () => {
-    window.print();
+    setPrintSuccessMessage('دستور چاپ به پرینتر ارسال شد. در کادر چاپ اندازه را روی A4 قرار دهید (کلید میانبر: Ctrl+P).');
+    setTimeout(() => setPrintSuccessMessage(null), 6000);
+
+    // 1. Direct standard browser print
+    try {
+      window.print();
+    } catch (e) {
+      console.warn('Direct window.print encountered error, attempting fallback iframe', e);
+    }
+
+    // 2. Fallback for sandboxed iframes where parent blocks window.print()
+    setTimeout(() => {
+      try {
+        const printDoc = document.getElementById('ballot-paper-print-document');
+        if (printDoc) {
+          let iframe = document.getElementById('ballot-print-hidden-iframe') as HTMLIFrameElement;
+          if (!iframe) {
+            iframe = document.createElement('iframe');
+            iframe.id = 'ballot-print-hidden-iframe';
+            iframe.style.position = 'fixed';
+            iframe.style.right = '0';
+            iframe.style.bottom = '0';
+            iframe.style.width = '0';
+            iframe.style.height = '0';
+            iframe.style.border = '0';
+            document.body.appendChild(iframe);
+          }
+          const doc = iframe.contentWindow?.document;
+          if (doc) {
+            doc.open();
+            doc.write(`
+              <!DOCTYPE html>
+              <html lang="fa" dir="rtl">
+                <head>
+                  <meta charset="utf-8">
+                  <title>${config.title}</title>
+                  <style>
+                    @page { size: A4 portrait; margin: 8mm; }
+                    body { font-family: 'Vazirmatn', Tahoma, sans-serif; margin: 0; padding: 0; background: #ffffff; color: #000000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                    * { box-sizing: border-box; }
+                    .break-after-page { page-break-after: always; break-after: page; }
+                    .break-inside-avoid { page-break-inside: avoid; break-inside: avoid; }
+                  </style>
+                  <link rel="stylesheet" href="/assets/index.css">
+                </head>
+                <body>
+                  ${printDoc.innerHTML}
+                </body>
+              </html>
+            `);
+            doc.close();
+            setTimeout(() => {
+              try {
+                iframe.contentWindow?.focus();
+                iframe.contentWindow?.print();
+              } catch (err) {
+                console.warn('Iframe print error', err);
+              }
+            }, 300);
+          }
+        }
+      } catch (err) {
+        console.warn('Iframe print fallback error', err);
+      }
+    }, 150);
   };
 
   // Generate ballot serial numbers for preview
@@ -178,17 +254,30 @@ export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={handlePrint}
-            className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-emerald-950/50 transition active:scale-95"
-            title="ارسال مستقیم به پرینتر با قالب استاندارد کاغذ"
-          >
-            <Printer className="w-4 h-4" />
-            <span>چاپ رسمی تعرفه‌ها ({toPersianDigits(config.totalCopiesToPrint)} برگ)</span>
-          </button>
+          <div className="flex flex-col items-end">
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-emerald-950/50 transition active:scale-95 cursor-pointer"
+              title="ارسال مستقیم به پرینتر یا ذخیره PDF با کلید میانبر Ctrl+P"
+            >
+              <Printer className="w-4 h-4" />
+              <span>چاپ رسمی تعرفه‌ها ({toPersianDigits(config.totalCopiesToPrint)} برگ)</span>
+            </button>
+            <span className="text-[10px] text-slate-400 mt-1 font-mono">
+              کلید میانبر: <kbd className="bg-slate-900 px-1 py-0.5 rounded border border-slate-700 text-slate-300">Ctrl + P</kbd>
+            </span>
+          </div>
         </div>
       </div>
+
+      {/* Floating Print Feedback Notification */}
+      {printSuccessMessage && (
+        <div className="no-print bg-emerald-950/90 border border-emerald-500/50 text-emerald-200 px-4 py-3 rounded-2xl text-xs flex items-center gap-2 shadow-xl animate-in fade-in">
+          <Printer className="w-4 h-4 text-emerald-400 flex-shrink-0 animate-bounce" />
+          <span>{printSuccessMessage}</span>
+        </div>
+      )}
 
       {/* Main Grid: Controls on Right, Live Interactive Paper Preview on Left (Hidden in print) */}
       <div className="no-print grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -256,7 +345,8 @@ export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
                     }`}
                   >
                     <Barcode className="w-4 h-4 mx-auto mb-1 text-amber-400" />
-                    <span className="text-[11px]">تعرفه تکی بارکددار</span>
+                    <span className="text-[11px] block font-bold">تعرفه نواری بارکددار</span>
+                    <span className="text-[9px] text-amber-300 block font-normal">(با ته‌برگ منگنه)</span>
                   </button>
 
                   <button
@@ -289,60 +379,80 @@ export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
 
               {/* Special Info Banner for Individual Barcode Cards */}
               {config.layoutStyle === 'INDIVIDUAL_BARCODE_CARDS' && (
-                <div className="bg-amber-950/40 border border-amber-800/60 p-2.5 rounded-xl text-[11px] text-amber-300 flex items-start gap-2">
+                <div className="bg-amber-950/40 border border-amber-800/60 p-3 rounded-xl text-[11px] text-amber-200 flex items-start gap-2.5">
                   <Barcode className="w-4 h-4 flex-shrink-0 text-amber-400 mt-0.5" />
                   <p className="leading-relaxed">
-                    <strong>تعرفه تکی بارکددار:</strong> برای هر کاندیدا کارت‌های رأی با بارکد اختصاصی (CAND-code) تولید و چاپ می‌شود. پس از بریدن برگه، اپراتور با گرفتن کارت جلوی بارکدخوان فوراً یک رأی برای کاندیدا ثبت می‌کند.
+                    <strong>تعرفه نواری بارکددار با ته‌برگ سابقه:</strong> در هر ردیف یک کاندیدا به صورت باریک و نواری چاپ می‌شود؛ انتهای هر تعرفه دارای یک ته‌برگ مجزا حاوی کد نامزد و محل منگنه است. پس از برش افقی، برگه‌های نامزدها روی هم چیده و منگنه می‌شوند تا به صورت دفترچه تعرفه به هر رأی‌دهنده تحویل گردند.
                   </p>
                 </div>
               )}
 
-              {/* Ballots per A4 Sheet */}
-              <div>
-                <label className="block font-medium text-slate-300 mb-1.5">
-                  تعداد تعرفه در هر برگ کاغذ A4:
-                </label>
-                <div className="grid grid-cols-3 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setConfig({ ...config, ballotsPerPage: 1 })}
-                    className={`p-2 rounded-xl border text-center transition ${
-                      config.ballotsPerPage === 1
-                        ? 'bg-emerald-600/30 border-emerald-500 text-white font-bold'
-                        : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <span>۱ در هر A4</span>
-                    <span className="block text-[10px] text-slate-400 mt-0.5">(برگه کامل)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setConfig({ ...config, ballotsPerPage: 2 })}
-                    className={`p-2 rounded-xl border text-center transition ${
-                      config.ballotsPerPage === 2
-                        ? 'bg-emerald-600/30 border-emerald-500 text-white font-bold'
-                        : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <span>۲ در هر A4</span>
-                    <span className="block text-[10px] text-emerald-400 mt-0.5">(استاندارد و بهینه)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setConfig({ ...config, ballotsPerPage: 4 })}
-                    className={`p-2 rounded-xl border text-center transition ${
-                      config.ballotsPerPage === 4
-                        ? 'bg-emerald-600/30 border-emerald-500 text-white font-bold'
-                        : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <span>۴ در هر A4</span>
-                    <span className="block text-[10px] text-slate-400 mt-0.5">(صرفه‌جویی بالا)</span>
-                  </button>
+              {/* Ballots per A4 Sheet (or 8-candidate strip indicator for barcode strips mode) */}
+              {config.layoutStyle === 'INDIVIDUAL_BARCODE_CARDS' ? (
+                <div>
+                  <label className="block font-medium text-slate-300 mb-1.5">
+                    تراکم چاپ نواری در هر برگ A4:
+                  </label>
+                  <div className="bg-slate-900 border border-amber-600/40 p-2.5 rounded-xl text-amber-200 text-xs flex items-center justify-between">
+                    <span className="font-bold flex items-center gap-1.5">
+                      <span>✂️</span>
+                      <span>۸ نوار باریک در هر برگه A4</span>
+                    </span>
+                    <span className="bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded text-[10px] font-mono font-bold">
+                      استاندارد دفترچه
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    طول هر تعرفه باریک و بهینه شده تا ۸ کاندیدا در یک برگه A4 چاپ شده و پس از برش روی هم منگنه شوند.
+                  </p>
                 </div>
-              </div>
+              ) : (
+                <div>
+                  <label className="block font-medium text-slate-300 mb-1.5">
+                    تعداد تعرفه در هر برگ کاغذ A4:
+                  </label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setConfig({ ...config, ballotsPerPage: 1 })}
+                      className={`p-2 rounded-xl border text-center transition ${
+                        config.ballotsPerPage === 1
+                          ? 'bg-emerald-600/30 border-emerald-500 text-white font-bold'
+                          : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <span>۱ در هر A4</span>
+                      <span className="block text-[10px] text-slate-400 mt-0.5">(برگه کامل)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setConfig({ ...config, ballotsPerPage: 2 })}
+                      className={`p-2 rounded-xl border text-center transition ${
+                        config.ballotsPerPage === 2
+                          ? 'bg-emerald-600/30 border-emerald-500 text-white font-bold'
+                          : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <span>۲ در هر A4</span>
+                      <span className="block text-[10px] text-emerald-400 mt-0.5">(استاندارد و بهینه)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setConfig({ ...config, ballotsPerPage: 4 })}
+                      className={`p-2 rounded-xl border text-center transition ${
+                        config.ballotsPerPage === 4
+                          ? 'bg-emerald-600/30 border-emerald-500 text-white font-bold'
+                          : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <span>۴ در هر A4</span>
+                      <span className="block text-[10px] text-slate-400 mt-0.5">(صرفه‌جویی بالا)</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Toggles */}
               <div className="pt-2 border-t border-slate-700/80 space-y-2">
@@ -437,87 +547,135 @@ export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
               <span>پیش‌نمایش زنده چاپی برگه A4</span>
             </div>
             <div className="flex items-center gap-2 font-mono">
-              <span>صفحه اول پیش‌نمایش • شامل {toPersianDigits(config.ballotsPerPage)} تعرفه</span>
+              <span>
+                {config.layoutStyle === 'INDIVIDUAL_BARCODE_CARDS'
+                  ? `صفحه اول پیش‌نمایش • شامل ${toPersianDigits(Math.min(8, candidates.length))} نوار کاندیدا با ته‌برگ`
+                  : `صفحه اول پیش‌نمایش • شامل ${toPersianDigits(config.ballotsPerPage)} تعرفه`}
+              </span>
             </div>
           </div>
 
           {/* Simulated A4 Paper in Dark Theme Container */}
-          <div className="bg-slate-950/80 p-4 sm:p-6 rounded-3xl border border-slate-800 flex justify-center overflow-x-auto shadow-2xl">
-            <div className="w-[520px] bg-white text-slate-950 p-6 rounded-lg shadow-2xl border border-slate-200 select-none scale-95 sm:scale-100 origin-top">
+          <div className="bg-slate-950/80 p-3 sm:p-5 rounded-3xl border border-slate-800 flex justify-center overflow-x-auto shadow-2xl">
+            <div className="w-[580px] max-w-full bg-white text-slate-950 p-4 sm:p-5 rounded-lg shadow-2xl border border-slate-200 select-none scale-95 sm:scale-100 origin-top">
               
               {/* Ballots on Page 1 */}
               {config.layoutStyle === 'INDIVIDUAL_BARCODE_CARDS' ? (
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {/* Page Sheet Banner */}
                   <div className="text-center border-b-2 border-slate-800 pb-2 mb-2">
                     <div className="flex items-center justify-between text-[9px] text-slate-700 font-bold mb-1">
                       <span>جمهوری اسلامی ایران • ستاد انتخابات</span>
                       <span className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded font-black">
-                        برگه‌های تعرفه رأی تکی کارتی (آماده برش با قیچی و اسکن مستقیم)
+                        تعرفه نواری بارکددار با ته‌برگ سابقه (آماده برش و منگنه دفترچه‌ای)
                       </span>
                       <span>شعبه: {toPersianDigits(session.stationNumber)}</span>
                     </div>
                     <h4 className="font-black text-sm text-slate-900 leading-tight">{config.title}</h4>
                     <p className="text-[9px] text-slate-600 mt-0.5">
-                      هر کارت متعلق به یک کاندیدا بوده و پس از برش، اپراتور با گرفتن بارکد جلوی بارکدخوان، ۱ رأی برای وی ثبت می‌نماید.
+                      در هر ردیف یک کاندیدا به صورت باریک قرار دارد. ته‌برگ هر کاندیدا حاوی کد اختصاصی و محل منگنه است تا برگه‌ها بریده و روی هم منگنه شوند.
                     </p>
                   </div>
 
-                  {/* Grid of cuttable candidate cards */}
-                  <div className="grid grid-cols-2 gap-2.5">
-                    {candidates.map((cand) => (
+                  {/* Single column stack of slim horizontal strips */}
+                  <div className="space-y-2">
+                    {candidates.slice(0, 8).map((cand) => (
                       <div 
                         key={cand.id} 
-                        className="border-2 border-dashed border-slate-500 p-2.5 rounded-xl bg-white relative space-y-2 shadow-sm"
+                        className="border-2 border-dashed border-slate-400 rounded-lg bg-white relative flex items-stretch text-slate-900 overflow-hidden shadow-sm"
                       >
-                        {/* Scissors Cut Guideline */}
-                        <div className="flex items-center justify-between text-[8px] text-slate-500 font-mono border-b border-dotted border-slate-300 pb-1">
-                          <span className="flex items-center gap-1 font-bold text-slate-700">
-                            <Scissors className="w-3 h-3 text-slate-600" />
-                            <span>خط برش تعرفه تکی</span>
-                          </span>
-                          <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-black text-[9px]">
-                            کد: {toPersianDigits(cand.candidateNumber)}
-                          </span>
-                        </div>
-
-                        {/* Candidate Info */}
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
+                        {/* RIGHT: Main voting slip (تعرفه اصلی جهت اسکن و انداختن در صندوق) */}
+                        <div className="flex-1 p-2 flex items-center justify-between gap-3 min-w-0">
+                          {/* Candidate photo & details */}
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
                             {config.showCandidatePhotos && (
                               <img
                                 src={cand.avatarUrl}
                                 alt={cand.name}
-                                className="w-10 h-10 rounded-xl object-cover border border-slate-300 flex-shrink-0"
+                                className="w-9 h-9 rounded-md object-cover border border-slate-300 flex-shrink-0"
                               />
                             )}
-                            <div className="min-w-0">
-                              <h5 className="font-bold text-xs text-slate-900 truncate leading-tight">{cand.name}</h5>
-                              <span className="font-mono text-[9px] text-slate-600 block mt-0.5">
-                                کد انتخاباتی: <strong className="text-black font-black text-[11px]">{toPersianDigits(cand.candidateNumber)}</strong>
-                              </span>
-                              {config.showCandidateAffiliations && (
-                                <span className="text-[8px] text-slate-500 truncate block">{cand.affiliation}</span>
-                              )}
+                            <div className="min-w-0 flex-1">
+                              {/* Full Candidate Name - Never truncated */}
+                              <h5 className="font-black text-xs sm:text-sm text-slate-950 leading-snug break-words">
+                                {cand.name}
+                              </h5>
+                              <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                                <span className="font-mono text-[9px] bg-slate-900 text-amber-300 px-1.5 py-0.2 rounded font-black flex-shrink-0">
+                                  کد: {toPersianDigits(cand.candidateNumber)}
+                                </span>
+                                {config.showCandidateAffiliations && cand.affiliation && (
+                                  <span className="text-[8px] text-slate-500 truncate max-w-[140px]">{cand.affiliation}</span>
+                                )}
+                                <span className="text-[7.5px] text-slate-400 font-mono flex items-center gap-1">
+                                  <span>شعبه {toPersianDigits(session.stationNumber)}</span>
+                                  <span>•</span>
+                                  <span>صندوق {session.boxNumber}</span>
+                                </span>
+                              </div>
                             </div>
                           </div>
 
-                          <div className="border border-dashed border-slate-400 rounded-lg p-1 text-[8px] text-slate-500 text-center w-14 flex-shrink-0">
-                            <Stamp className="w-3 h-3 mx-auto mb-0.5 text-slate-400" />
-                            <span>محل مهر</span>
+                          {/* Seal box & Barcode */}
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            {config.showOfficialStamps && (
+                              <div className="border border-dashed border-slate-400 rounded p-0.5 text-[7px] text-slate-500 text-center w-10 flex flex-col items-center justify-center min-h-[30px] flex-shrink-0">
+                                <Stamp className="w-2.5 h-2.5 text-slate-400" />
+                                <span className="leading-none mt-0.5">محل مهر</span>
+                              </div>
+                            )}
+
+                            <div className="bg-slate-50 border border-slate-200 rounded p-1 flex flex-col items-center justify-center flex-shrink-0">
+                              <BarcodeSvg 
+                                value={toEnglishDigits(cand.candidateNumber).replace(/\D/g, '') || String(cand.registrationOrder || '101')} 
+                                className="h-6 max-w-[95px]" 
+                              />
+                            </div>
                           </div>
                         </div>
 
-                        {/* The Crisp Scannable Barcode */}
-                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-1 flex flex-col items-center justify-center">
-                          <BarcodeSvg value={`CAND-${cand.candidateNumber}`} className="h-7" />
-                          <span className="text-[8px] text-slate-700 font-bold mt-0.5">
-                            جهت ثبت فوری رأی با بارکدخوان
+                        {/* CENTER: Vertical Perforation line */}
+                        <div className="w-4 border-r-2 border-dashed border-slate-400 flex flex-col items-center justify-center bg-slate-100 text-slate-600 px-0.5 select-none flex-shrink-0">
+                          <Scissors className="w-2.5 h-2.5 text-slate-600" />
+                          <span className="text-[6.5px] [writing-mode:vertical-rl] font-bold text-slate-500 my-0.5 tracking-tighter">
+                            خط برش
                           </span>
+                        </div>
+
+                        {/* LEFT: Stub (ته‌برگ سابقه با کد نامزد و محل منگنه) */}
+                        <div className="w-28 sm:w-32 bg-amber-50/50 p-1.5 flex flex-col justify-between text-right flex-shrink-0 border-r border-slate-200">
+                          <div className="flex items-center justify-between border-b border-dashed border-slate-300 pb-0.5 mb-0.5">
+                            <span className="text-[7.5px] text-slate-600 font-mono flex items-center gap-0.5 font-bold">
+                              <span>📎</span>
+                              <span>محل منگنه</span>
+                            </span>
+                            <span className="text-[7.5px] font-black text-slate-700">ته‌برگ سابقه</span>
+                          </div>
+
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-[8px] text-slate-600 font-medium">کد نامزد:</span>
+                              <strong className="text-[11px] font-black font-mono text-emerald-800 bg-emerald-100 border border-emerald-300 px-1 py-0.2 rounded">
+                                {toPersianDigits(cand.candidateNumber)}
+                              </strong>
+                            </div>
+                            <p className="text-[8.5px] font-bold text-slate-900 mt-0.5 leading-snug break-words">{cand.name}</p>
+                          </div>
+
+                          <div className="border-t border-dotted border-slate-300 pt-0.5 mt-0.5 flex items-center justify-between text-[7px] text-slate-500 font-mono">
+                            <span>امضا / اثر انگشت</span>
+                            <span>#{toPersianDigits(cand.candidateNumber)}</span>
+                          </div>
                         </div>
                       </div>
                     ))}
                   </div>
+
+                  {candidates.length > 8 && (
+                    <div className="text-[9px] text-center text-slate-500 mt-2 bg-slate-100 p-1.5 rounded-lg border border-slate-200 font-mono">
+                      نمایش ۸ نامزد صفحه اول از مجموع {toPersianDigits(candidates.length)} نامزد (در هنگام چاپ در {toPersianDigits(Math.ceil(candidates.length / 8))} برگه مجزا تفکیک می‌شود)
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className={`space-y-6 ${config.ballotsPerPage === 4 ? 'grid grid-cols-2 gap-4 space-y-0' : ''}`}>
@@ -595,62 +753,6 @@ export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
                               ))}
                             </tbody>
                           </table>
-                        </div>
-                      )}
-
-                      {config.layoutStyle === 'INDIVIDUAL_BARCODE_CARDS' && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                          {candidates.map((cand) => (
-                            <div 
-                              key={cand.id} 
-                              className="border-2 border-dashed border-slate-400 p-2.5 rounded-xl bg-white relative overflow-hidden space-y-2 shadow-sm"
-                            >
-                              {/* Scissors Cut Guideline */}
-                              <div className="flex items-center justify-between text-[8px] text-slate-500 font-mono border-b border-dotted border-slate-300 pb-1">
-                                <span className="flex items-center gap-1">
-                                  <Scissors className="w-3 h-3 text-slate-600" />
-                                  <span>خط برش تعرفه تکی</span>
-                                </span>
-                                <span className="bg-amber-100 text-amber-800 px-1 py-0.2 rounded font-bold">
-                                  تعرفه اختصاصی کاندیدا
-                                </span>
-                              </div>
-
-                              {/* Candidate Info */}
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  {config.showCandidatePhotos && (
-                                    <img
-                                      src={cand.avatarUrl}
-                                      alt={cand.name}
-                                      className="w-9 h-9 rounded-xl object-cover border border-slate-300 flex-shrink-0"
-                                    />
-                                  )}
-                                  <div className="min-w-0">
-                                    <h5 className="font-bold text-xs text-slate-900 truncate leading-tight">{cand.name}</h5>
-                                    <span className="font-mono text-[9px] text-slate-600 block mt-0.5">
-                                      کد انتخاباتی: <strong className="text-black font-black text-[10px]">{toPersianDigits(cand.candidateNumber)}</strong>
-                                    </span>
-                                    {config.showCandidateAffiliations && (
-                                      <span className="text-[8px] text-slate-500 truncate block">{cand.affiliation}</span>
-                                    )}
-                                  </div>
-                                </div>
-
-                                <div className="border border-dashed border-slate-400 rounded-lg p-1 text-[8px] text-slate-500 text-center w-14 flex-shrink-0">
-                                  <span>محل مهر</span>
-                                </div>
-                              </div>
-
-                              {/* The Crisp Scannable Barcode */}
-                              <div className="bg-slate-50 border border-slate-200 rounded-lg p-1.5 flex flex-col items-center justify-center">
-                                <BarcodeSvg value={`CAND-${cand.candidateNumber}`} className="h-8" />
-                                <span className="text-[8px] text-slate-600 mt-0.5">
-                                  جهت ثبت فوری رأی با بارکدخوان
-                                </span>
-                              </div>
-                            </div>
-                          ))}
                         </div>
                       )}
 
@@ -746,88 +848,153 @@ export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
           PRINT ONLY AREA: Rendered exclusively when window.print() is executed!
           Contains full set of configured ballots ready for physical paper printing.
       ========================================================================== */}
-      <div className="hidden print:block text-black bg-white" dir="rtl">
+      <div id="ballot-paper-print-document" className="ballot-paper-print-root print-only print:block text-black bg-white" dir="rtl">
         {config.layoutStyle === 'INDIVIDUAL_BARCODE_CARDS' ? (
-          Array.from({ length: Math.max(1, config.totalCopiesToPrint) }).map((_, sheetIdx) => (
-            <div 
-              key={sheetIdx} 
-              className="w-full min-h-[297mm] p-6 box-border bg-white text-black break-after-page flex flex-col justify-between"
-              style={{ pageBreakAfter: 'always' }}
-            >
-              <div>
-                {/* Header on printed sheet */}
-                <div className="text-center border-b-2 border-black pb-2 mb-3">
-                  <div className="flex items-center justify-between text-xs font-bold mb-1">
-                    <span>جمهوری اسلامی ایران • ستاد انتخابات</span>
-                    <span className="border border-black px-2.5 py-0.5 rounded font-black">
-                      برگه‌های تعرفه رأی تکی کارتی (آماده برش با قیچی • برگ {toPersianDigits(sheetIdx + 1)})
-                    </span>
-                    <span>شعبه: {toPersianDigits(session.stationNumber)}</span>
-                  </div>
-                  <h3 className="font-black text-base text-black">{config.title}</h3>
-                  <p className="text-[10px] text-black mt-0.5">
-                    برگه‌های تعرفه را در امتداد خط‌چین‌ها بریده و هنگام شمارش آرا، بارکد هر برگه را جلوی بارکدخوان بگیرید تا ۱ رأی برای نامزد فوراً ثبت شود.
-                  </p>
-                </div>
+          (() => {
+            const CANDIDATES_PER_SHEET = 8;
+            const candidateChunks: Candidate[][] = [];
+            for (let i = 0; i < candidates.length; i += CANDIDATES_PER_SHEET) {
+              candidateChunks.push(candidates.slice(i, i + CANDIDATES_PER_SHEET));
+            }
+            if (candidateChunks.length === 0) candidateChunks.push([]);
 
-                {/* Grid of cuttable candidate cards */}
-                <div className="grid grid-cols-2 gap-3.5">
-                  {candidates.map((cand) => (
-                    <div 
-                      key={cand.id} 
-                      className="border-2 border-dashed border-black rounded-xl p-3 bg-white relative space-y-2 break-inside-avoid"
-                    >
-                      <div className="flex items-center justify-between text-[9px] font-mono border-b border-dotted border-black pb-1">
-                        <span className="flex items-center gap-1 font-bold">
-                          <Scissors className="w-3.5 h-3.5" />
-                          <span>خط برش قیچی (برگه تعرفه تکی کاندیدا)</span>
+            const totalSets = Math.max(1, config.totalCopiesToPrint);
+
+            return Array.from({ length: totalSets }).flatMap((_, setIdx) =>
+              candidateChunks.map((chunk, chunkIdx) => (
+                <div 
+                  key={`set-${setIdx}-chunk-${chunkIdx}`} 
+                  className="w-full min-h-[297mm] p-4 box-border bg-white text-black break-after-page flex flex-col justify-between"
+                  style={{ pageBreakAfter: 'always' }}
+                >
+                  <div>
+                    {/* Header on printed sheet */}
+                    <div className="text-center border-b-2 border-black pb-1.5 mb-2">
+                      <div className="flex items-center justify-between text-[11px] font-bold mb-1">
+                        <span>جمهوری اسلامی ایران • ستاد انتخابات</span>
+                        <span className="border-2 border-black px-2.5 py-0.5 rounded font-black text-xs bg-gray-100">
+                          برگه‌های تعرفه رأی نواری بارکددار با ته‌برگ سابقه و منگنه دفترچه‌ای
+                          {totalSets > 1 ? ` (دسته ${toPersianDigits(setIdx + 1)} از ${toPersianDigits(totalSets)})` : ''}
                         </span>
-                        <span className="font-black text-[10px]">کد: {toPersianDigits(cand.candidateNumber)}</span>
+                        <span>شعبه: {toPersianDigits(session.stationNumber)}</span>
                       </div>
+                      <h3 className="font-black text-sm text-black">{config.title}</h3>
+                      <p className="text-[9px] text-gray-800 mt-0.5 font-medium">
+                        دستورالعمل: تعرفه‌های نواری زیر را از خط‌چین افقی برش بزنید. برگه‌های نامزدها را به ترتیب روی هم چیده و از سمت چپ (بخش ته‌برگ) منگنه کنید تا دفترچه تعرفه رأی‌دهنده آماده شود. رأی‌دهنده برگه نامزد منتخب را از خط پرفراژ جدا کرده و در صندوق می‌اندازد.
+                      </p>
+                    </div>
 
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2.5">
-                          {config.showCandidatePhotos && (
-                            <img 
-                              src={cand.avatarUrl} 
-                              alt="" 
-                              className="w-12 h-12 object-cover rounded-lg border border-black flex-shrink-0" 
-                            />
-                          )}
-                          <div>
-                            <strong className="text-sm block text-black font-black">{cand.name}</strong>
-                            <span className="font-mono text-xs block text-black mt-0.5">
-                              کد انتخاباتی: <strong className="text-black font-black">{toPersianDigits(cand.candidateNumber)}</strong>
+                    {/* Single column of slim horizontal strips */}
+                    <div className="space-y-1.5">
+                      {chunk.map((cand) => (
+                        <div 
+                          key={cand.id} 
+                          className="border-2 border-dashed border-black rounded-lg bg-white relative flex items-stretch text-black overflow-hidden break-inside-avoid min-h-[29mm]"
+                        >
+                          {/* RIGHT SIDE: Main Ballot Slip */}
+                          <div className="flex-1 p-2 flex items-center justify-between gap-3 min-w-0">
+                            {/* Candidate Info */}
+                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                              {config.showCandidatePhotos && (
+                                <img 
+                                  src={cand.avatarUrl} 
+                                  alt="" 
+                                  className="w-10 h-10 object-cover rounded-md border border-black flex-shrink-0" 
+                                />
+                              )}
+                              <div className="min-w-0 flex-1">
+                                {/* Full Candidate Name - Never truncated */}
+                                <strong className="text-sm sm:text-base block text-black font-black leading-snug break-words">
+                                  {cand.name}
+                                </strong>
+                                <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                                  <span className="font-mono text-[10px] bg-black text-white px-1.5 py-0.2 rounded font-black flex-shrink-0">
+                                    کد: {toPersianDigits(cand.candidateNumber)}
+                                  </span>
+                                  {config.showCandidateAffiliations && cand.affiliation && (
+                                    <span className="text-[9px] text-gray-800 font-bold truncate max-w-[150px]">{cand.affiliation}</span>
+                                  )}
+                                  <span className="text-[8px] text-gray-600 font-mono flex items-center gap-1.5">
+                                    <span>شعبه: {toPersianDigits(session.stationNumber)}</span>
+                                    <span>•</span>
+                                    <span>صندوق: {session.boxNumber}</span>
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Stamp & Barcode */}
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              {config.showOfficialStamps && (
+                                <div className="border border-dashed border-black rounded p-1 text-[8px] text-center w-12 flex flex-col items-center justify-center min-h-[36px] flex-shrink-0">
+                                  <Stamp className="w-3.5 h-3.5 mx-auto mb-0.5" />
+                                  <span className="leading-none">محل مهر</span>
+                                </div>
+                              )}
+
+                              <div className="border border-black rounded p-1 bg-white flex flex-col items-center justify-center flex-shrink-0">
+                                <BarcodeSvg 
+                                  value={toEnglishDigits(cand.candidateNumber).replace(/\D/g, '') || String(cand.registrationOrder || '101')} 
+                                  className="h-7 max-w-[115px]" 
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* VERTICAL PERFORATION / CUT DIVIDER */}
+                          <div className="w-5 border-r-2 border-dashed border-black flex flex-col items-center justify-center bg-gray-100 text-black px-0.5 select-none flex-shrink-0">
+                            <Scissors className="w-3.5 h-3.5" />
+                            <span className="text-[7px] [writing-mode:vertical-rl] font-bold text-gray-700 my-0.5 tracking-tighter">
+                              خط پرفراژ
                             </span>
-                            {config.showCandidateAffiliations && (
-                              <span className="text-[10px] text-gray-800 block">{cand.affiliation}</span>
-                            )}
+                          </div>
+
+                          {/* LEFT SIDE: STUB (ته‌برگ سابقه) */}
+                          <div className="w-32 sm:w-36 bg-gray-50 p-2 flex flex-col justify-between text-right flex-shrink-0 border-r border-black">
+                            <div className="flex items-center justify-between border-b border-dashed border-gray-400 pb-0.5 mb-1">
+                              <span className="text-[8px] font-mono text-gray-700 flex items-center gap-0.5 font-bold">
+                                <span>📎</span>
+                                <span>محل منگنه</span>
+                              </span>
+                              <span className="text-[8px] font-black text-black">
+                                ته‌برگ سابقه
+                              </span>
+                            </div>
+
+                            <div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-[9px] text-gray-700 font-bold">کد نامزد:</span>
+                                <strong className="text-sm font-black font-mono text-black bg-white border border-black px-1.5 py-0.2 rounded">
+                                  {toPersianDigits(cand.candidateNumber)}
+                                </strong>
+                              </div>
+                              <p className="text-[9.5px] font-black text-black mt-0.5 leading-snug break-words">
+                                {cand.name}
+                              </p>
+                            </div>
+
+                            <div className="border-t border-dotted border-gray-400 pt-0.5 mt-0.5 flex items-center justify-between text-[7.5px] text-gray-600 font-mono">
+                              <span>امضا / اثر انگشت</span>
+                              <span>#{toPersianDigits(cand.registrationOrder || cand.candidateNumber)}</span>
+                            </div>
                           </div>
                         </div>
-                        <div className="border border-dashed border-black rounded p-1.5 text-[8px] text-center w-16 flex-shrink-0">
-                          <Stamp className="w-3.5 h-3.5 mx-auto mb-0.5" />
-                          <span>محل مهر</span>
-                        </div>
-                      </div>
-
-                      {/* Crisp Barcode for printing */}
-                      <div className="border-2 border-black rounded-lg p-1.5 bg-white flex flex-col items-center">
-                        <BarcodeSvg value={`CAND-${cand.candidateNumber}`} className="h-8" />
-                        <span className="text-[8px] text-black font-black mt-0.5">
-                          اسکن مستقیم با بارکدخوان جهت ثبت آنی رأی
-                        </span>
-                      </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
+                  </div>
 
-              <div className="border-t border-black pt-2 text-[9px] text-center text-gray-700 flex items-center justify-between font-mono">
-                <span>برگ {toPersianDigits(sheetIdx + 1)} از {toPersianDigits(config.totalCopiesToPrint)}</span>
-                <span>سامانه جامع مدیریت و شمارش انتخابات حضوری • طراح و سازنده: بابک بهرامی پور</span>
-              </div>
-            </div>
-          ))
+                  {/* Sheet Footer */}
+                  <div className="border-t border-black pt-1.5 text-[9px] text-center text-gray-700 flex items-center justify-between font-mono">
+                    <span>
+                      دسته {toPersianDigits(setIdx + 1)} از {toPersianDigits(totalSets)}
+                      {candidateChunks.length > 1 ? ` (بخش ${toPersianDigits(chunkIdx + 1)} از ${toPersianDigits(candidateChunks.length)})` : ''}
+                    </span>
+                    <span>سامانه جامع مدیریت و شمارش انتخابات حضوری</span>
+                  </div>
+                </div>
+              ))
+            );
+          })()
         ) : (
           Array.from({ length: totalSheets }).map((_, sheetIdx) => (
           <div 
@@ -903,42 +1070,6 @@ export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
                           ))}
                         </tbody>
                       </table>
-                    )}
-
-                    {config.layoutStyle === 'INDIVIDUAL_BARCODE_CARDS' && (
-                      <div className="grid grid-cols-2 gap-3 mb-2">
-                        {candidates.map((cand) => (
-                          <div key={cand.id} className="border-2 border-dashed border-black rounded-lg p-2.5 bg-white relative">
-                            <div className="flex items-center justify-between text-[8px] font-mono border-b border-dotted border-black pb-1 mb-1.5">
-                              <span className="flex items-center gap-1">
-                                <Scissors className="w-3 h-3" />
-                                <span>خط برش قیچی (برگه تعرفه تکی کاندیدا)</span>
-                              </span>
-                              <span className="font-bold">کد: {toPersianDigits(cand.candidateNumber)}</span>
-                            </div>
-
-                            <div className="flex items-center justify-between gap-2 mb-2">
-                              <div className="flex items-center gap-2">
-                                {config.showCandidatePhotos && (
-                                  <img src={cand.avatarUrl} alt="" className="w-9 h-9 object-cover rounded border border-black" />
-                                )}
-                                <div>
-                                  <strong className="text-xs block text-black">{cand.name}</strong>
-                                  <span className="text-[10px] text-gray-700 block">{cand.affiliation}</span>
-                                </div>
-                              </div>
-                              <div className="border border-dashed border-black rounded p-1 text-[8px] text-center w-14">
-                                <span>محل مهر</span>
-                              </div>
-                            </div>
-
-                            {/* Crisp Barcode for printing */}
-                            <div className="border border-black rounded p-1 bg-white flex flex-col items-center">
-                              <BarcodeSvg value={`CAND-${cand.candidateNumber}`} className="h-7" />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
                     )}
 
                     {config.layoutStyle === 'CANDIDATE_CARDS' && (

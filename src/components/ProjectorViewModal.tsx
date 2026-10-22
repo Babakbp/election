@@ -204,6 +204,29 @@ export const ProjectorViewModal: React.FC<ProjectorViewModalProps> = ({
                       <span className="font-mono text-[11px] px-2 py-0.5 bg-slate-800 text-amber-300 border border-slate-700/80 rounded font-semibold flex-shrink-0">
                         کد {toPersianDigits(c.candidateNumber)}
                       </span>
+                      {(() => {
+                        const role = session.candidateElectedRoles?.[c.id] || c.electedRole;
+                        const pCount = session.principalSeatsCount ?? 5;
+                        const aCount = session.alternateSeatsCount ?? 2;
+                        const isPrincipal = role === 'PRINCIPAL' || (!role && c.rank <= pCount);
+                        const isAlternate = role === 'ALTERNATE' || (!role && c.rank > pCount && c.rank <= pCount + aCount);
+
+                        if (isPrincipal) {
+                          return (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex-shrink-0">
+                              عضو اصلی
+                            </span>
+                          );
+                        }
+                        if (isAlternate) {
+                          return (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-black bg-blue-500/20 text-blue-300 border border-blue-500/40 flex-shrink-0">
+                              عضو علی‌البدل
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
                       <span className="hidden sm:inline text-xs text-slate-400 truncate">
                         • {c.affiliation}
                       </span>

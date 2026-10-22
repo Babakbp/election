@@ -2,6 +2,7 @@ import express from 'express';
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
+import fs from 'fs';
 import os from 'os';
 import { fileURLToPath } from 'url';
 
@@ -264,10 +265,13 @@ app.post('/api/sync/state', (req, res) => {
 
 
 // Configure Vite middleware in development, or static in production
-const isProduction = process.env.NODE_ENV === 'production';
+const distPath = path.resolve(__dirname, 'dist');
+const hasDist = fs.existsSync(distPath) && fs.existsSync(path.resolve(distPath, 'index.html'));
+const isDev = process.env.npm_lifecycle_event === 'dev' || process.env.NODE_ENV === 'development';
+const isProduction = process.env.NODE_ENV === 'production' || (!isDev && hasDist);
 
 async function startServer() {
-  if (!isProduction) {
+  if (isDev || !hasDist) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: {
@@ -278,9 +282,10 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
+    console.log(`[Server] Serving production static bundle from ${distPath}`);
+    app.use(express.static(distPath));
     app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+      res.sendFile(path.resolve(distPath, 'index.html'));
     });
   }
 
