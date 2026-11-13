@@ -23,6 +23,8 @@ interface LicenseActivationModalProps {
   onClose: () => void;
   onActivated: () => void;
   actionTitle?: string;
+  description?: string;
+  emailSubject?: string;
 }
 
 export const LicenseActivationModal: React.FC<LicenseActivationModalProps> = ({
@@ -30,6 +32,8 @@ export const LicenseActivationModal: React.FC<LicenseActivationModalProps> = ({
   onClose,
   onActivated,
   actionTitle = 'تعریف و مدیریت نامزدهای رسمی',
+  description,
+  emailSubject = 'درخواست کلید لایسنس نرم‌افزار شمارش آرا و قرعه‌کشی',
 }) => {
   const [hardwareId] = useState(() => getMachineHardwareId());
   const [licenseKeyInput, setLicenseKeyInput] = useState('');
@@ -57,7 +61,7 @@ export const LicenseActivationModal: React.FC<LicenseActivationModalProps> = ({
 
     const success = await activateLicense(licenseKeyInput.trim(), 'کاربر رسمی سامانه');
     if (success) {
-      setSuccessMessage('لایسنس رسمی با موفقیت فعال شد! دسترسی کامل به تعریف نامزدها برقرار گردید.');
+      setSuccessMessage('لایسنس رسمی با موفقیت فعال شد! دسترسی کامل به امکانات رسمی برقرار گردید.');
       setTimeout(() => {
         onActivated();
         onClose();
@@ -103,8 +107,12 @@ export const LicenseActivationModal: React.FC<LicenseActivationModalProps> = ({
             <span>شما در حال حاضر از نسخه آزمایشی (دمو رایگان) استفاده می‌نمایید.</span>
           </div>
           <p className="text-slate-400 leading-normal">
-            در نسخه دمو، می‌توانید با نامزدهای نمونه آزمایشی کار کرده و فرآیند شمارش، ثبت بارکدخوان، پروژکتور سالن و چاپ را تست فرمایید. 
-            اما جهت <strong>ثبت نامزدهای واقعی، ویرایش و برگزاری انتخابات رسمی</strong>، نرم‌افزار نیازمند ثبت کلید لایسنس می‌باشد.
+            {description || (
+              <>
+                در نسخه دمو، می‌توانید با داده‌های نمونه آزمایشی کار کرده و فرآیند سامانه را تست فرمایید.
+                اما جهت <strong>ثبت نامزدهای واقعی، ورود فایل اکسل و برگزاری رسمی</strong>، لطفاً شماره سریال کامپیوتر زیر را کپی و برای سازنده ارسال نمایید تا کلید لایسنس اختصاصی دریافت کنید.
+              </>
+            )}
           </p>
         </div>
 
@@ -142,7 +150,7 @@ export const LicenseActivationModal: React.FC<LicenseActivationModalProps> = ({
             </div>
 
             <a
-              href={`mailto:${CREATOR_EMAIL}?subject=درخواست%20کلید%20لایسنس%20نرم‌افزار%20شمارش%20آرا&body=با%20سلام%0Aشماره%20سریال%20کامپیوتر%20من:%0A${hardwareId}`}
+              href={`mailto:${CREATOR_EMAIL}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(`با سلام\nشماره سریال کامپیوتر من جهت دریافت کلید لایسنس:\n${hardwareId}`)}`}
               className="px-3 py-1.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 hover:text-white rounded-lg text-[11px] font-bold border border-indigo-500/40 flex items-center gap-1.5 self-start sm:self-auto transition"
             >
               <Mail className="w-3.5 h-3.5" />

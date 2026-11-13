@@ -369,7 +369,11 @@ export const CandidatesTab: React.FC<CandidatesTabProps> = ({
             <>
               <button
                 type="button"
-                onClick={() => candidateFileInputRef.current?.click()}
+                onClick={() => {
+                  if (checkLicenseOrPrompt('بارگذاری نامزدها از فایل اکسل')) {
+                    candidateFileInputRef.current?.click();
+                  }
+                }}
                 className="px-3 py-2 bg-emerald-600/90 hover:bg-emerald-600 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-emerald-950/40 transition"
                 title="بارگذاری اسامی و مشخصات نامزدها از فایل اکسل"
               >

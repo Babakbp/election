@@ -17,8 +17,10 @@ import {
   exportLotteryParticipantsTemplateToExcel,
   exportLotteryResultsToExcel,
   formatIdentifierTypeLabel,
+  getDefaultLotterySettings,
   loadLastLotteryResult,
   loadLotteryArchives,
+  loadLotteryDemoMode,
   loadLotteryParticipants,
   loadLotterySettings,
   normalizeAndValidateLotteryCode,
@@ -28,10 +30,13 @@ import {
   saveAllLotteryArchives,
   saveLastLotteryResult,
   saveLotteryArchive,
+  saveLotteryDemoMode,
   saveLotteryParticipants,
   saveLotterySettings,
 } from '../../utils/lotteryEngine';
+import { getLicenseStatus } from '../../utils/license';
 import { formatJalali, toEnglishDigits, toPersianDigits } from '../../utils/persian';
+import { LicenseActivationModal } from '../LicenseActivationModal';
 import { LotteryWheel } from './LotteryWheel';
 import { printLotteryMinutes } from './lotteryPrint';
 import {
@@ -47,6 +52,7 @@ import {
   FileJson,
   FileSpreadsheet,
   FileText,
+  Lock,
   Maximize,
   Minimize,
   Play,
@@ -76,10 +82,19 @@ type LotteryTab = 'DRAW' | 'PARTICIPANTS' | 'RESULTS' | 'ARCHIVE';
 
 export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }) => {
   const [activeTab, setActiveTab] = useState<LotteryTab>('DRAW');
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(() => loadLotteryDemoMode());
+  const [licenseData, setLicenseData] = useState(() => getLicenseStatus());
+  const [isLicenseModalOpen, setIsLicenseModalOpen] = useState(false);
+  const [showDemoWipeModal, setShowDemoWipeModal] = useState(false);
+
   const [settings, setSettings] = useState<LotterySettings>(() => loadLotterySettings());
-  const [participants, setParticipants] = useState<LotteryParticipant[]>(() =>
-    loadLotteryParticipants()
-  );
+  const [participants, setParticipants] = useState<LotteryParticipant[]>(() => {
+    const stored = loadLotteryParticipants();
+    if (stored.length === 0 && loadLotteryDemoMode() && !loadLastLotteryResult()) {
+      return createSampleLotteryParticipants();
+    }
+    return stored;
+  });
   const [lastResult, setLastResult] = useState<LotteryDrawResult | null>(() =>
     loadLastLotteryResult()
   );
@@ -108,6 +123,10 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
   }, [feedback]);
 
   // Persist changes automatically
+  useEffect(() => {
+    saveLotteryDemoMode(isDemoMode);
+  }, [isDemoMode]);
+
   useEffect(() => {
     saveLotterySettings(settings);
   }, [settings]);
@@ -289,7 +308,22 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
     showFeedback('success', `«${nextParticipant.fullName}» به فهرست قرعه‌کشی اضافه شد.`);
   };
 
+  const handleRequestExcelImport = () => {
+    const currentLic = getLicenseStatus();
+    setLicenseData(currentLic);
+    if (!currentLic.isLicensed) {
+      setIsLicenseModalOpen(true);
+      return;
+    }
+    excelFileRef.current?.click();
+  };
+
   const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!getLicenseStatus().isLicensed) {
+      setIsLicenseModalOpen(true);
+      e.target.value = '';
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -532,9 +566,39 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
   const handleLoadSampleParticipants = () => {
     const samples = createSampleLotteryParticipants();
     setParticipants(samples);
+    setIsDemoMode(true);
     showFeedback(
       'success',
       `${toPersianDigits(samples.length)} شرکت‌کننده نمونه با کد پرسنلی ۸ رقمی و کد ملی ۱۰ رقمی بارگذاری شدند.`
+    );
+  };
+
+  const handleConfirmWipeDemoData = () => {
+    setParticipants([]);
+    setLastResult(null);
+    setJustCompletedDraw(false);
+    setSettings(getDefaultLotterySettings());
+    setIsDemoMode(false);
+    setShowDemoWipeModal(false);
+    showFeedback(
+      'success',
+      'تمام اطلاعات دمو در قرعه‌کشی حذف شدند و سامانه آماده ثبت اطلاعات واقعی است.'
+    );
+  };
+
+  const handleRestoreDemoDisplay = () => {
+    const samples = createSampleLotteryParticipants();
+    setParticipants(samples);
+    setLastResult(null);
+    setJustCompletedDraw(false);
+    setSettings({
+      ...getDefaultLotterySettings(),
+      title: 'قرعه‌کشی نمونه و آزمایشی (دمو)',
+    });
+    setIsDemoMode(true);
+    showFeedback(
+      'success',
+      `نمایش دمو بازگردانده شد و ${toPersianDigits(samples.length)} شرکت‌کننده نمونه در قرعه‌کشی بارگذاری شدند.`
     );
   };
 
@@ -1074,6 +1138,55 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
               </div>
             </div>
 
+            {/* Demo Status & Wipe/Restore Bar */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3 text-xs">
+                <Sparkles
+                  className={`w-4 h-4 shrink-0 ${
+                    isDemoMode ? 'text-amber-400' : 'text-emerald-400'
+                  }`}
+                />
+                <div>
+                  <span className="font-bold text-white">
+                    {isDemoMode
+                      ? 'وضعیت نمایش دمو فعال است (داده‌های آزمایشی قرعه‌کشی)'
+                      : 'حالت ثبت واقعی فعال است (اطلاعات دمو حذف شده‌اند)'}
+                  </span>
+                  <p className="text-slate-400 mt-0.5">
+                    {isDemoMode
+                      ? 'برای پاک‌سازی افراد نمونه و شروع قرعه‌کشی واقعی، دکمه «حذف اطلاعات دمو» را بزنید.'
+                      : 'در صورت نیاز به تست مجدد چرخ قرعه‌کشی، می‌توانید نمایش دمو را بازگردانید.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                {isDemoMode && (
+                  <button
+                    type="button"
+                    disabled={isSpinning}
+                    onClick={() => setShowDemoWipeModal(true)}
+                    className="px-3.5 py-2 rounded-xl bg-red-950/70 hover:bg-red-900/80 disabled:opacity-50 text-red-200 border border-red-800/70 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                    <span>حذف اطلاعات دمو</span>
+                  </button>
+                )}
+
+                {(!isDemoMode || participants.length === 0) && (
+                  <button
+                    type="button"
+                    disabled={isSpinning}
+                    onClick={handleRestoreDemoDisplay}
+                    className="px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 disabled:opacity-50 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>بازگشت نمایش دمو</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
             {/* Two-column Workspace: Wheel Stage (Left/Center) + Draw Settings (Right) */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
               {/* Right Column (5 cols): Settings & Start Control */}
@@ -1523,10 +1636,14 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
 
                 <button
                   type="button"
-                  onClick={() => excelFileRef.current?.click()}
-                  className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors"
+                  onClick={handleRequestExcelImport}
+                  className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer"
                 >
-                  <Upload className="w-4 h-4" />
+                  {!licenseData.isLicensed ? (
+                    <Lock className="w-4 h-4" />
+                  ) : (
+                    <Upload className="w-4 h-4" />
+                  )}
                   <span>ورود از فایل اکسل</span>
                 </button>
 
@@ -1548,14 +1665,25 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                   <span>ثبت گروهی متنی</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={handleLoadSampleParticipants}
-                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span>بارگذاری فهرست نمونه</span>
-                </button>
+                {isDemoMode ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowDemoWipeModal(true)}
+                    className="px-3.5 py-2 rounded-xl bg-red-950/70 hover:bg-red-900/80 text-red-200 border border-red-800/70 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4 text-red-400" />
+                    <span>حذف اطلاعات دمو</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleRestoreDemoDisplay}
+                    className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>بازگشت نمایش دمو</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -1567,6 +1695,24 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                 </button>
               </div>
             </div>
+
+            {!licenseData.isLicensed && (
+              <div className="bg-slate-900 border border-amber-500/40 rounded-2xl px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2.5 text-slate-200">
+                  <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    جهت <strong className="text-white">ورود فهرست از فایل اکسل</strong>، ارسال شماره سریال کامپیوتر و دریافت کلید لایسنس الزامی است.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsLicenseModalOpen(true)}
+                  className="px-3.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold whitespace-nowrap transition-colors self-start sm:self-auto"
+                >
+                  مشاهده سریال کامپیوتر و فعال‌سازی لایسنس
+                </button>
+              </div>
+            )}
 
             {/* Single Participant Registration Form */}
             <form
@@ -2828,6 +2974,74 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
           </div>
         </div>
       )}
+
+      {/* Confirm Wipe Demo Data Modal */}
+      {showDemoWipeModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-red-500/40 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2 text-white font-black text-sm">
+                <AlertTriangle className="w-5 h-5 text-red-400" />
+                <span>تأیید حذف اطلاعات دمو در قرعه‌کشی</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDemoWipeModal(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5 text-xs text-slate-300 leading-relaxed">
+              <p>با تأیید این عملیات:</p>
+              <ul className="list-disc pr-5 space-y-1 text-slate-400">
+                <li>تمام شرکت‌کنندگان نمونه (دمو) از فهرست قرعه‌کشی پاک می‌شوند.</li>
+                <li>نتیجه نمایشی فعلی پاک‌سازی شده و تنظیمات به حالت آماده ثبت واقعی برمی‌گردد.</li>
+                <li>سوابق ثبت‌شده در بایگانی دائمی بدون تغییر باقی می‌مانند.</li>
+              </ul>
+              <p className="text-amber-300 pt-1">
+                هر زمان مایل باشید می‌توانید با دکمه «بازگشت نمایش دمو» داده‌های نمونه را مجدداً بارگذاری کنید.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowDemoWipeModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-colors"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmWipeDemoData}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>بله، اطلاعات دمو حذف شود</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* License Activation & Serial Number Guidance Modal for Excel Import */}
+      <LicenseActivationModal
+        isOpen={isLicenseModalOpen}
+        onClose={() => setIsLicenseModalOpen(false)}
+        onActivated={() => {
+          setLicenseData(getLicenseStatus());
+          setIsLicenseModalOpen(false);
+          showFeedback(
+            'success',
+            'لایسنس رسمی با موفقیت فعال شد. اکنون می‌توانید فهرست شرکت‌کنندگان را از فایل اکسل وارد نمایید.'
+          );
+        }}
+        actionTitle="ورود فهرست شرکت‌کنندگان از فایل اکسل (.xlsx)"
+        emailSubject="درخواست کلید لایسنس برای ورود اکسل در سامانه قرعه‌کشی"
+        description="در نسخه آزمایشی (دمو)، می‌توانید با شرکت‌کنندگان نمونه کار کرده، چرخ قرعه‌کشی را اجرا کنید و خروجی‌ها را آزمایش نمایید. اما جهت ورود اطلاعات از فایل اکسل (.xlsx)، لطفاً شماره سریال کامپیوتر زیر را کپی و برای سازنده ارسال نمایید تا کلید لایسنس اختصاصی دریافت کنید."
+      />
     </div>
   );
 };

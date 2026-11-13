@@ -19,6 +19,44 @@ export const STORAGE_KEY_LOTTERY_SETTINGS = 'lottery_panel_settings_v1';
 export const STORAGE_KEY_LOTTERY_PARTICIPANTS = 'lottery_panel_participants_v1';
 export const STORAGE_KEY_LOTTERY_LAST_RESULT = 'lottery_panel_last_result_v1';
 export const STORAGE_KEY_LOTTERY_ARCHIVES = 'lottery_panel_archives_v1';
+export const STORAGE_KEY_LOTTERY_DEMO_MODE = 'lottery_panel_demo_mode_v1';
+
+export function loadLotteryDemoMode(): boolean {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_LOTTERY_DEMO_MODE);
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    // First-time open (no stored participants yet) starts in Demo Mode
+    const hasParticipants = localStorage.getItem(STORAGE_KEY_LOTTERY_PARTICIPANTS) !== null;
+    const hasResult = localStorage.getItem(STORAGE_KEY_LOTTERY_LAST_RESULT) !== null;
+    return !hasParticipants && !hasResult;
+  } catch {
+    return true;
+  }
+}
+
+export function saveLotteryDemoMode(isDemo: boolean): void {
+  localStorage.setItem(STORAGE_KEY_LOTTERY_DEMO_MODE, isDemo ? 'true' : 'false');
+}
+export const STORAGE_KEY_LOTTERY_DEMO_MODE = 'lottery_panel_demo_mode_v1';
+
+export function loadLotteryDemoMode(): boolean {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_LOTTERY_DEMO_MODE);
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    // First-time open (no stored participants yet) starts in Demo Mode
+    const hasParticipants = localStorage.getItem(STORAGE_KEY_LOTTERY_PARTICIPANTS) !== null;
+    const hasResult = localStorage.getItem(STORAGE_KEY_LOTTERY_LAST_RESULT) !== null;
+    return !hasParticipants && !hasResult;
+  } catch {
+    return true;
+  }
+}
+
+export function saveLotteryDemoMode(isDemo: boolean): void {
+  localStorage.setItem(STORAGE_KEY_LOTTERY_DEMO_MODE, isDemo ? 'true' : 'false');
+}
 
 export function getDefaultLotterySettings(): LotterySettings {
   return {
