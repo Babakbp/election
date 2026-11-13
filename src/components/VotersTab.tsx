@@ -13,7 +13,9 @@ import {
   sortVotersByFamilyName
 } from '../utils/persian';
 import { exportVotersTemplateToExcel, exportVotersListToExcel } from '../utils/export';
+import { getLicenseStatus } from '../utils/license';
 import { audioFeedback } from '../utils/audioFeedback';
+import { LicenseActivationModal } from './LicenseActivationModal';
 import { 
   Users, 
   Upload, 
@@ -76,6 +78,7 @@ export const VotersTab: React.FC<VotersTabProps> = ({
   const [newBirthDate, setNewBirthDate] = useState('');
   const [newDisqualified, setNewDisqualified] = useState(false);
   const [addError, setAddError] = useState('');
+  const [isLicensePromptOpen, setIsLicensePromptOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Barcode Scanner Station state
@@ -417,6 +420,11 @@ export const VotersTab: React.FC<VotersTabProps> = ({
 
   // Import .xlsx or .xls or .csv File (Requested: در اکسل ورودی تاریخ تولد شمسی نیز لحاظ شود)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!getLicenseStatus().isLicensed) {
+      setIsLicensePromptOpen(true);
+      e.target.value = '';
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -695,7 +703,14 @@ export const VotersTab: React.FC<VotersTabProps> = ({
 
           {/* Import .xlsx */}
           <button
-            onClick={() => fileInputRef.current?.click()}
+            type="button"
+            onClick={() => {
+              if (!getLicenseStatus().isLicensed) {
+                setIsLicensePromptOpen(true);
+                return;
+              }
+              fileInputRef.current?.click();
+            }}
             className="px-3.5 py-2 bg-emerald-600/90 hover:bg-emerald-600 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-emerald-950/40 transition"
           >
             <Upload className="w-4 h-4" />
@@ -1824,6 +1839,17 @@ export const VotersTab: React.FC<VotersTabProps> = ({
           </div>
         </div>
       )}
+
+      {/* License Activation Modal for Excel Import */}
+      <LicenseActivationModal
+        isOpen={isLicensePromptOpen}
+        onClose={() => setIsLicensePromptOpen(false)}
+        onActivated={() => {
+          setIsLicensePromptOpen(false);
+        }}
+        actionTitle="بارگذاری فهرست واجدین شرایط از فایل اکسل (.xlsx)"
+        description="در نسخه آزمایشی (دمو)، می‌توانید از فهرست نمونه رأی‌دهندگان برای تست احراز هویت و رأی‌گیری استفاده کنید. اما جهت ورود فایل اکسل واجدین شرایط، لطفاً شماره سریال کامپیوتر زیر را کپی و برای سازنده ارسال نمایید تا کلید لایسنس اختصاصی دریافت کنید."
+      />
 
     </div>
   );
