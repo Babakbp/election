@@ -32,6 +32,7 @@ interface HeaderProps {
   onNavigateToArchive?: () => void;
   archivedCount?: number;
   onSelectStationRole?: (role: 'master' | 'projector') => void;
+  onOpenLotteryPanel?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -49,6 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
   onNavigateToArchive,
   archivedCount,
   onSelectStationRole,
+  onOpenLotteryPanel,
 }) => {
   const [timeString, setTimeString] = useState<string>('');
 
@@ -184,6 +186,7 @@ export const Header: React.FC<HeaderProps> = ({
               onOpenSecurity={onOpenSecurity}
               archivedCount={archivedCount}
               onSelectStationRole={onSelectStationRole}
+              onOpenLotteryPanel={onOpenLotteryPanel}
             />
 
           </div>

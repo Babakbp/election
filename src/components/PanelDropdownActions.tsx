@@ -18,7 +18,8 @@ import {
   Monitor,
   Copy,
   Check,
-  ShieldAlert
+  ShieldAlert,
+  Dices
 } from 'lucide-react';
 import { toPersianDigits } from '../utils/persian';
 
@@ -31,6 +32,7 @@ export interface PanelDropdownActionsProps {
   onOpenManualTallySheet?: () => void;
   onOpenSecurity?: () => void;
   onSelectStationRole?: (role: 'master' | 'projector') => void;
+  onOpenLotteryPanel?: () => void;
   archivedCount?: number;
   className?: string;
   isHeader?: boolean;
@@ -45,6 +47,7 @@ export const PanelDropdownActions: React.FC<PanelDropdownActionsProps> = ({
   onOpenManualTallySheet,
   onOpenSecurity,
   onSelectStationRole,
+  onOpenLotteryPanel,
   archivedCount = 0,
   className = '',
   isHeader = false,
@@ -144,6 +147,18 @@ export const PanelDropdownActions: React.FC<PanelDropdownActionsProps> = ({
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
           </span>
+        </button>
+      )}
+
+      {onOpenLotteryPanel && (
+        <button
+          type="button"
+          onClick={onOpenLotteryPanel}
+          title="ورود به سامانه مستقل قرعه‌کشی (کد پرسنلی / کد ملی)"
+          className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs sm:text-sm font-black flex items-center gap-1.5 shadow-lg shadow-amber-950/40 border border-amber-300/60 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+        >
+          <Dices className="w-4 h-4" />
+          <span>پنل قرعه‌کشی</span>
         </button>
       )}
 

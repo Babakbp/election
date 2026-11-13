@@ -54,6 +54,7 @@ import { ManualTallySheetModal } from './components/ManualTallySheetModal';
 import { ElectionGuideModal } from './components/ElectionGuideModal';
 import { SessionsArchiveTab } from './components/SessionsArchiveTab';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { LotteryPanel } from './components/lottery/LotteryPanel';
 import { syncEngine, OperatingMode, StationRole, SyncMessage } from './utils/syncEngine';
 import { getAppPasswordInfo, getLicenseStatus, CREATOR_NAME, CREATOR_EMAIL } from './utils/license';
 import { archiveSession, getArchivedSessions } from './utils/fileBackupStorage';
@@ -72,7 +73,8 @@ import {
   UserPlus,
   Ticket,
   HelpCircle,
-  Archive
+  Archive,
+  Dices
 } from 'lucide-react';
 
 const STORAGE_KEY_SESSION = 'elections_session_v1';
@@ -154,6 +156,25 @@ export default function App() {
     }
     return true;
   });
+
+  // Independent Workspace Mode: Election System vs Standalone Lottery System
+  const [panelMode, setPanelMode] = useState<'ELECTION' | 'LOTTERY'>(() => {
+    try {
+      const saved = localStorage.getItem('app_workspace_mode_v1');
+      if (saved === 'LOTTERY' || saved === 'ELECTION') return saved;
+    } catch {
+      // ignore
+    }
+    return 'ELECTION';
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('app_workspace_mode_v1', panelMode);
+    } catch {
+      // ignore
+    }
+  }, [panelMode]);
 
   // UI Navigation
   const [activeTab, setActiveTab] = useState<
@@ -1603,6 +1624,20 @@ export default function App() {
     );
   }
 
+  // Dedicated Completely Independent Lottery System Panel
+  if (panelMode === 'LOTTERY') {
+    return (
+      <ErrorBoundary fallbackTitle="خطا در بارگذاری سامانه مستقل قرعه‌کشی">
+        <LotteryPanel onSwitchToElection={() => setPanelMode('ELECTION')} />
+        <AppLockScreenModal
+          isLocked={isAppLocked}
+          onUnlocked={() => setIsAppLocked(false)}
+          sessionTitle="سامانه مستقل قرعه‌کشی"
+        />
+      </ErrorBoundary>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-white print:bg-white print:text-black print:min-h-0" dir="rtl">
       
@@ -1622,6 +1657,7 @@ export default function App() {
         onNavigateToArchive={() => setActiveTab('ARCHIVE')}
         archivedCount={archivedSessions.length}
         onSelectStationRole={handleSelectStationRole}
+        onOpenLotteryPanel={() => setPanelMode('LOTTERY')}
       />
 
       {/* Floating Flash Toast Overlay (Zero Layout Shift) */}
@@ -1635,8 +1671,8 @@ export default function App() {
 
       {/* Main Tab Navigation (Hidden in print) */}
       <nav className="no-print print:hidden bg-slate-900/90 border-b border-slate-800 sticky top-[61px] z-20 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between overflow-x-auto scrollbar-none">
-          <div className="flex items-center gap-1 sm:gap-2 py-2">
+        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1 sm:gap-2 py-2 overflow-x-auto scrollbar-none flex-1 min-w-0">
             
             {/* Tab 1: Live Voting */}
             <button
@@ -1769,6 +1805,19 @@ export default function App() {
               <span className="font-mono text-xs px-1.5 py-0.2 rounded-md bg-slate-950/40">
                 {toPersianDigits(archivedSessions.length)}
               </span>
+            </button>
+          </div>
+
+          {/* Dedicated Switcher to Independent Lottery System */}
+          <div className="py-2 pr-3 mr-2 border-r border-slate-800 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => setPanelMode('LOTTERY')}
+              className="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-black flex items-center gap-1.5 whitespace-nowrap bg-amber-500 hover:bg-amber-400 text-slate-950 transition shadow-md cursor-pointer"
+              title="ورود به صفحه و سامانه کاملاً مجزای قرعه‌کشی"
+            >
+              <Dices className="w-4 h-4" />
+              <span>پنل قرعه‌کشی</span>
             </button>
           </div>
         </div>

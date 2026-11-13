@@ -79,11 +79,17 @@ export const BarcodeSvg: React.FC<{
   const totalW = curX + quietZone;
 
   return (
-    <div className="flex flex-col items-center bg-white px-1.5 py-0.5 rounded">
+    <div 
+      className="flex flex-col items-center justify-center bg-white px-1 py-0.5 rounded"
+      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff', boxSizing: 'border-box' }}
+    >
       <svg 
         viewBox={`0 0 ${totalW} 36`} 
         className={`w-full max-w-[170px] ${className}`} 
         preserveAspectRatio="none"
+        width="110"
+        height="26"
+        style={{ width: '100%', maxWidth: '110px', height: '26px', display: 'block' }}
       >
         <rect x="0" y="0" width={totalW} height="36" fill="#ffffff" />
         {rects.map((r, idx) => (
@@ -91,7 +97,10 @@ export const BarcodeSvg: React.FC<{
         ))}
       </svg>
       {showText && (
-        <span className="font-mono text-[9px] font-black tracking-widest text-slate-950 mt-0.5 select-all dir-ltr">
+        <span 
+          className="font-mono text-[9px] font-black tracking-widest text-slate-950 mt-0.5 select-all dir-ltr"
+          style={{ fontFamily: 'monospace', fontSize: '9px', fontWeight: 900, letterSpacing: '2px', color: '#000000', direction: 'ltr', marginTop: '2px', textAlign: 'center', display: 'block' }}
+        >
           {safeCode}
         </span>
       )}
@@ -171,6 +180,11 @@ export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
           }
           const doc = iframe.contentWindow?.document;
           if (doc) {
+            // Clone active stylesheets and style tags from current document
+            const styleNodes = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+              .map(node => node.outerHTML)
+              .join('\n');
+
             doc.open();
             doc.write(`
               <!DOCTYPE html>
@@ -178,14 +192,117 @@ export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
                 <head>
                   <meta charset="utf-8">
                   <title>${config.title}</title>
+                  ${styleNodes}
                   <style>
-                    @page { size: A4 portrait; margin: 8mm; }
-                    body { font-family: 'Vazirmatn', Tahoma, sans-serif; margin: 0; padding: 0; background: #ffffff; color: #000000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-                    * { box-sizing: border-box; }
-                    .break-after-page { page-break-after: always; break-after: page; }
-                    .break-inside-avoid { page-break-inside: avoid; break-inside: avoid; }
+                    @page { 
+                      size: A4 portrait; 
+                      margin: 6mm 8mm; 
+                    }
+                    * { 
+                      box-sizing: border-box !important; 
+                      -webkit-print-color-adjust: exact !important; 
+                      print-color-adjust: exact !important; 
+                    }
+                    body { 
+                      font-family: 'Vazirmatn', Tahoma, sans-serif !important; 
+                      margin: 0 !important; 
+                      padding: 0 !important; 
+                      background: #ffffff !important; 
+                      color: #000000 !important; 
+                      direction: rtl !important;
+                    }
+                    .break-after-page { 
+                      page-break-after: always !important; 
+                      break-after: page !important; 
+                    }
+                    .break-inside-avoid { 
+                      page-break-inside: avoid !important; 
+                      break-inside: avoid !important; 
+                    }
+                    /* Strict photo size containment */
+                    img {
+                      max-width: 40px !important;
+                      max-height: 40px !important;
+                      object-fit: cover !important;
+                      border-radius: 6px !important;
+                    }
+                    /* Strict barcode SVG containment */
+                    svg {
+                      max-width: 100% !important;
+                    }
+                    .ballot-strip-row {
+                      border: 2px dashed #000000 !important;
+                      border-radius: 8px !important;
+                      margin-bottom: 3.5mm !important;
+                      min-height: 29mm !important;
+                      max-height: 32mm !important;
+                      display: flex !important;
+                      flex-direction: row !important;
+                      align-items: stretch !important;
+                      background-color: #ffffff !important;
+                      color: #000000 !important;
+                      overflow: hidden !important;
+                      page-break-inside: avoid !important;
+                      break-inside: avoid !important;
+                      box-sizing: border-box !important;
+                    }
+                    .ballot-candidate-photo {
+                      width: 40px !important;
+                      height: 40px !important;
+                      min-width: 40px !important;
+                      min-height: 40px !important;
+                      max-width: 40px !important;
+                      max-height: 40px !important;
+                      object-fit: cover !important;
+                      border-radius: 6px !important;
+                      border: 1.5px solid #000000 !important;
+                      flex-shrink: 0 !important;
+                      display: block !important;
+                    }
+                    .ballot-barcode-box {
+                      width: 115px !important;
+                      min-width: 115px !important;
+                      max-width: 115px !important;
+                      border: 1.5px solid #000000 !important;
+                      border-radius: 6px !important;
+                      padding: 2px 4px !important;
+                      display: flex !important;
+                      flex-direction: column !important;
+                      align-items: center !important;
+                      justify-content: center !important;
+                      background-color: #ffffff !important;
+                      flex-shrink: 0 !important;
+                      box-sizing: border-box !important;
+                    }
+                    .ballot-perforation {
+                      width: 22px !important;
+                      min-width: 22px !important;
+                      max-width: 22px !important;
+                      border-right: 2px dashed #000000 !important;
+                      display: flex !important;
+                      flex-direction: column !important;
+                      align-items: center !important;
+                      justify-content: center !important;
+                      background-color: #f3f4f6 !important;
+                      color: #000000 !important;
+                      flex-shrink: 0 !important;
+                      box-sizing: border-box !important;
+                    }
+                    .ballot-stub {
+                      width: 135px !important;
+                      min-width: 135px !important;
+                      max-width: 135px !important;
+                      border-right: 1.5px solid #000000 !important;
+                      background-color: #f9fafb !important;
+                      padding: 6px 8px !important;
+                      display: flex !important;
+                      flex-direction: column !important;
+                      justify-content: space-between !important;
+                      text-align: right !important;
+                      flex-shrink: 0 !important;
+                      box-sizing: border-box !important;
+                    }
                   </style>
-                  <link rel="stylesheet" href="/assets/index.css">
                 </head>
                 <body>
                   ${printDoc.innerHTML}
@@ -889,32 +1006,86 @@ export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
                       {chunk.map((cand) => (
                         <div 
                           key={cand.id} 
-                          className="border-2 border-dashed border-black rounded-lg bg-white relative flex items-stretch text-black overflow-hidden break-inside-avoid min-h-[29mm]"
+                          className="ballot-strip-row border-2 border-dashed border-black rounded-lg bg-white relative flex items-stretch text-black overflow-hidden break-inside-avoid min-h-[29mm] mb-1.5"
+                          style={{
+                            border: '2px dashed #000000',
+                            borderRadius: '8px',
+                            minHeight: '29mm',
+                            maxHeight: '32mm',
+                            display: 'flex',
+                            flexDirection: 'row',
+                            alignItems: 'stretch',
+                            marginBottom: '3mm',
+                            overflow: 'hidden',
+                            backgroundColor: '#ffffff',
+                            color: '#000000',
+                            pageBreakInside: 'avoid',
+                            breakInside: 'avoid',
+                            boxSizing: 'border-box'
+                          }}
                         >
                           {/* RIGHT SIDE: Main Ballot Slip */}
-                          <div className="flex-1 p-2 flex items-center justify-between gap-3 min-w-0">
+                          <div 
+                            className="flex-1 p-2 flex items-center justify-between gap-3 min-w-0"
+                            style={{ flex: 1, padding: '6px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', minWidth: 0, boxSizing: 'border-box' }}
+                          >
                             {/* Candidate Info */}
-                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <div 
+                              className="flex items-center gap-2.5 min-w-0 flex-1"
+                              style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}
+                            >
                               {config.showCandidatePhotos && (
                                 <img 
                                   src={cand.avatarUrl} 
                                   alt="" 
-                                  className="w-10 h-10 object-cover rounded-md border border-black flex-shrink-0" 
+                                  width="40"
+                                  height="40"
+                                  className="ballot-candidate-photo w-10 h-10 object-cover rounded-md border border-black flex-shrink-0" 
+                                  style={{
+                                    width: '40px',
+                                    height: '40px',
+                                    minWidth: '40px',
+                                    minHeight: '40px',
+                                    maxWidth: '40px',
+                                    maxHeight: '40px',
+                                    objectFit: 'cover',
+                                    borderRadius: '6px',
+                                    border: '1.5px solid #000000',
+                                    flexShrink: 0,
+                                    display: 'block'
+                                  }}
                                 />
                               )}
                               <div className="min-w-0 flex-1">
                                 {/* Full Candidate Name - Never truncated */}
-                                <strong className="text-sm sm:text-base block text-black font-black leading-snug break-words">
+                                <strong 
+                                  className="text-sm sm:text-base block text-black font-black leading-snug break-words"
+                                  style={{ color: '#000000', fontWeight: 900, fontSize: '13px', lineHeight: 1.25 }}
+                                >
                                   {cand.name}
                                 </strong>
-                                <div className="flex items-center gap-2 flex-wrap mt-0.5">
-                                  <span className="font-mono text-[10px] bg-black text-white px-1.5 py-0.2 rounded font-black flex-shrink-0">
+                                <div 
+                                  className="flex items-center gap-2 flex-wrap mt-0.5"
+                                  style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '3px' }}
+                                >
+                                  <span 
+                                    className="font-mono text-[10px] bg-black text-white px-1.5 py-0.2 rounded font-black flex-shrink-0"
+                                    style={{ fontFamily: 'monospace', fontSize: '10px', backgroundColor: '#000000', color: '#ffffff', padding: '1px 5px', borderRadius: '4px', fontWeight: 900 }}
+                                  >
                                     کد: {toPersianDigits(cand.candidateNumber)}
                                   </span>
                                   {config.showCandidateAffiliations && cand.affiliation && (
-                                    <span className="text-[9px] text-gray-800 font-bold truncate max-w-[150px]">{cand.affiliation}</span>
+                                    <span 
+                                      className="text-[9px] text-gray-800 font-bold truncate max-w-[150px]"
+                                      style={{ fontSize: '9px', color: '#1f2937', fontWeight: 700 }}
+                                    >
+                                      {cand.affiliation}
+                                    </span>
                                   )}
-                                  <span className="text-[8px] text-gray-600 font-mono flex items-center gap-1.5">
+                                  <span 
+                                    className="text-[8px] text-gray-600 font-mono flex items-center gap-1.5"
+                                    style={{ fontSize: '8px', color: '#4b5563', fontFamily: 'monospace' }}
+                                  >
                                     <span>شعبه: {toPersianDigits(session.stationNumber)}</span>
                                     <span>•</span>
                                     <span>صندوق: {session.boxNumber}</span>
@@ -924,56 +1095,141 @@ export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
                             </div>
 
                             {/* Stamp & Barcode */}
-                            <div className="flex items-center gap-2 flex-shrink-0">
+                            <div 
+                              className="flex items-center gap-2 flex-shrink-0"
+                              style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}
+                            >
                               {config.showOfficialStamps && (
-                                <div className="border border-dashed border-black rounded p-1 text-[8px] text-center w-12 flex flex-col items-center justify-center min-h-[36px] flex-shrink-0">
+                                <div 
+                                  className="border border-dashed border-black rounded p-1 text-[8px] text-center w-12 flex flex-col items-center justify-center min-h-[36px] flex-shrink-0"
+                                  style={{
+                                    border: '1.5px dashed #000000',
+                                    borderRadius: '6px',
+                                    padding: '2px 4px',
+                                    textAlign: 'center',
+                                    width: '46px',
+                                    minWidth: '46px',
+                                    minHeight: '36px',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    flexShrink: 0,
+                                    boxSizing: 'border-box'
+                                  }}
+                                >
                                   <Stamp className="w-3.5 h-3.5 mx-auto mb-0.5" />
-                                  <span className="leading-none">محل مهر</span>
+                                  <span className="leading-none text-[8px]" style={{ fontSize: '8px' }}>محل مهر</span>
                                 </div>
                               )}
 
-                              <div className="border border-black rounded p-1 bg-white flex flex-col items-center justify-center flex-shrink-0">
+                              <div 
+                                className="ballot-barcode-box border border-black rounded p-1 bg-white flex flex-col items-center justify-center flex-shrink-0"
+                                style={{
+                                  width: '115px',
+                                  minWidth: '115px',
+                                  maxWidth: '115px',
+                                  border: '1.5px solid #000000',
+                                  borderRadius: '6px',
+                                  padding: '2px 4px',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  backgroundColor: '#ffffff',
+                                  flexShrink: 0,
+                                  boxSizing: 'border-box'
+                                }}
+                              >
                                 <BarcodeSvg 
                                   value={toEnglishDigits(cand.candidateNumber).replace(/\D/g, '') || String(cand.registrationOrder || '101')} 
-                                  className="h-7 max-w-[115px]" 
+                                  className="h-7 max-w-[105px]" 
+                                  showText={true}
                                 />
                               </div>
                             </div>
                           </div>
 
                           {/* VERTICAL PERFORATION / CUT DIVIDER */}
-                          <div className="w-5 border-r-2 border-dashed border-black flex flex-col items-center justify-center bg-gray-100 text-black px-0.5 select-none flex-shrink-0">
+                          <div 
+                            className="ballot-perforation w-5 border-r-2 border-dashed border-black flex flex-col items-center justify-center bg-gray-100 text-black px-0.5 select-none flex-shrink-0"
+                            style={{
+                              width: '22px',
+                              minWidth: '22px',
+                              maxWidth: '22px',
+                              borderRight: '2px dashed #000000',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              backgroundColor: '#f3f4f6',
+                              color: '#000000',
+                              flexShrink: 0,
+                              boxSizing: 'border-box'
+                            }}
+                          >
                             <Scissors className="w-3.5 h-3.5" />
-                            <span className="text-[7px] [writing-mode:vertical-rl] font-bold text-gray-700 my-0.5 tracking-tighter">
+                            <span 
+                              className="text-[7px] [writing-mode:vertical-rl] font-bold text-gray-700 my-0.5 tracking-tighter"
+                              style={{ fontSize: '7px', writingMode: 'vertical-rl', fontWeight: 'bold', color: '#374151' }}
+                            >
                               خط پرفراژ
                             </span>
                           </div>
 
                           {/* LEFT SIDE: STUB (ته‌برگ سابقه) */}
-                          <div className="w-32 sm:w-36 bg-gray-50 p-2 flex flex-col justify-between text-right flex-shrink-0 border-r border-black">
-                            <div className="flex items-center justify-between border-b border-dashed border-gray-400 pb-0.5 mb-1">
-                              <span className="text-[8px] font-mono text-gray-700 flex items-center gap-0.5 font-bold">
+                          <div 
+                            className="ballot-stub w-32 sm:w-36 bg-gray-50 p-2 flex flex-col justify-between text-right flex-shrink-0 border-r border-black"
+                            style={{
+                              width: '135px',
+                              minWidth: '135px',
+                              maxWidth: '135px',
+                              borderRight: '1.5px solid #000000',
+                              backgroundColor: '#f9fafb',
+                              padding: '6px 8px',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              justifyContent: 'space-between',
+                              textAlign: 'right',
+                              flexShrink: 0,
+                              boxSizing: 'border-box'
+                            }}
+                          >
+                            <div 
+                              className="flex items-center justify-between border-b border-dashed border-gray-400 pb-0.5 mb-1"
+                              style={{ borderBottom: '1px dashed #9ca3af', paddingBottom: '3px', marginBottom: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                            >
+                              <span className="text-[8px] font-mono text-gray-700 flex items-center gap-0.5 font-bold" style={{ fontSize: '8px', fontFamily: 'monospace' }}>
                                 <span>📎</span>
                                 <span>محل منگنه</span>
                               </span>
-                              <span className="text-[8px] font-black text-black">
+                              <span className="text-[8px] font-black text-black" style={{ fontSize: '8px', fontWeight: 900, color: '#000000' }}>
                                 ته‌برگ سابقه
                               </span>
                             </div>
 
                             <div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-[9px] text-gray-700 font-bold">کد نامزد:</span>
-                                <strong className="text-sm font-black font-mono text-black bg-white border border-black px-1.5 py-0.2 rounded">
+                              <div className="flex items-center justify-between" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <span className="text-[9px] text-gray-700 font-bold" style={{ fontSize: '9px', fontWeight: 700, color: '#374151' }}>کد نامزد:</span>
+                                <strong 
+                                  className="text-sm font-black font-mono text-black bg-white border border-black px-1.5 py-0.2 rounded"
+                                  style={{ fontSize: '13px', fontWeight: 900, fontFamily: 'monospace', color: '#000000', backgroundColor: '#ffffff', border: '1px solid #000000', padding: '1px 5px', borderRadius: '4px' }}
+                                >
                                   {toPersianDigits(cand.candidateNumber)}
                                 </strong>
                               </div>
-                              <p className="text-[9.5px] font-black text-black mt-0.5 leading-snug break-words">
+                              <p 
+                                className="text-[9.5px] font-black text-black mt-0.5 leading-snug break-words"
+                                style={{ fontSize: '9.5px', fontWeight: 900, color: '#000000', marginTop: '2px', lineHeight: 1.25 }}
+                              >
                                 {cand.name}
                               </p>
                             </div>
 
-                            <div className="border-t border-dotted border-gray-400 pt-0.5 mt-0.5 flex items-center justify-between text-[7.5px] text-gray-600 font-mono">
+                            <div 
+                              className="border-t border-dotted border-gray-400 pt-0.5 mt-0.5 flex items-center justify-between text-[7.5px] text-gray-600 font-mono"
+                              style={{ borderTop: '1px dotted #9ca3af', paddingTop: '3px', marginTop: '3px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '7.5px', fontFamily: 'monospace', color: '#4b5563' }}
+                            >
                               <span>امضا / اثر انگشت</span>
                               <span>#{toPersianDigits(cand.registrationOrder || cand.candidateNumber)}</span>
                             </div>
@@ -1056,7 +1312,14 @@ export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
                               )}
                               {config.showCandidatePhotos && (
                                 <td className="p-1 border-l border-black text-center">
-                                  <img src={cand.avatarUrl} alt="" className="w-6 h-6 object-cover mx-auto rounded" />
+                                  <img 
+                                    src={cand.avatarUrl} 
+                                    alt="" 
+                                    width="24"
+                                    height="24"
+                                    className="w-6 h-6 object-cover mx-auto rounded" 
+                                    style={{ width: '24px', height: '24px', minWidth: '24px', minHeight: '24px', maxWidth: '24px', maxHeight: '24px', objectFit: 'cover', borderRadius: '4px', display: 'block', margin: '0 auto' }}
+                                  />
                                 </td>
                               )}
                               <td className="p-1 pr-2 border-l border-black font-bold">{cand.name}</td>
@@ -1078,7 +1341,14 @@ export const BallotPaperDesignerTab: React.FC<BallotPaperDesignerTabProps> = ({
                           <div key={cand.id} className="border border-black rounded p-2 flex items-center justify-between bg-white">
                             <div className="flex items-center gap-2">
                               {config.showCandidatePhotos && (
-                                <img src={cand.avatarUrl} alt="" className="w-8 h-8 rounded object-cover border border-black" />
+                                <img 
+                                  src={cand.avatarUrl} 
+                                  alt="" 
+                                  width="32"
+                                  height="32"
+                                  className="w-8 h-8 rounded object-cover border border-black" 
+                                  style={{ width: '32px', height: '32px', minWidth: '32px', minHeight: '32px', maxWidth: '32px', maxHeight: '32px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #000000', display: 'block' }}
+                                />
                               )}
                               <div>
                                 <strong className="text-xs block">{cand.name}</strong>

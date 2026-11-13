@@ -193,10 +193,95 @@
     print-color-adjust: exact !important;
   }
 
+  /* Specific ballot paper layout hardening under print */
+  #ballot-paper-print-document img,
+  .ballot-paper-print-root img {
+    max-width: 40px !important;
+    max-height: 40px !important;
+    object-fit: cover !important;
+  }
+
+  .ballot-strip-row {
+    border: 2px dashed #000000 !important;
+    border-radius: 8px !important;
+    margin-bottom: 3.5mm !important;
+    min-height: 29mm !important;
+    max-height: 32mm !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: stretch !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    overflow: hidden !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    box-sizing: border-box !important;
+  }
+
+  .ballot-candidate-photo {
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 40px !important;
+    min-height: 40px !important;
+    max-width: 40px !important;
+    max-height: 40px !important;
+    object-fit: cover !important;
+    border-radius: 6px !important;
+    border: 1.5px solid #000000 !important;
+    flex-shrink: 0 !important;
+    display: block !important;
+  }
+
+  .ballot-barcode-box {
+    width: 115px !important;
+    min-width: 115px !important;
+    max-width: 115px !important;
+    border: 1.5px solid #000000 !important;
+    border-radius: 6px !important;
+    padding: 2px 4px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background-color: #ffffff !important;
+    flex-shrink: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  .ballot-perforation {
+    width: 22px !important;
+    min-width: 22px !important;
+    max-width: 22px !important;
+    border-right: 2px dashed #000000 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background-color: #f3f4f6 !important;
+    color: #000000 !important;
+    flex-shrink: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  .ballot-stub {
+    width: 135px !important;
+    min-width: 135px !important;
+    max-width: 135px !important;
+    border-right: 1.5px solid #000000 !important;
+    background-color: #f9fafb !important;
+    padding: 6px 8px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    text-align: right !important;
+    flex-shrink: 0 !important;
+    box-sizing: border-box !important;
+  }
+
   /* Standard A4 Paper Setup */
   @page {
     size: A4 portrait;
-    margin: 8mm 8mm 8mm 8mm;
+    margin: 6mm 8mm 6mm 8mm;
   }
 
   body {
