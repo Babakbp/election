@@ -8,6 +8,7 @@ export interface LotteryParticipant {
   fullName: string;
   identifierType: LotteryIdentifierType;
   identifierCode: string; // 8-digit personnel code OR 10-digit national ID
+  phoneNumber?: string; // شماره موبایل فرد
   department?: string; // واحد سازمانی / بخش / توضیحات
   isEligible: boolean;
   addedAt: string;

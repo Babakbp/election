@@ -21,6 +21,7 @@ import {
   loadLotteryParticipants,
   loadLotterySettings,
   normalizeAndValidateLotteryCode,
+  normalizeMobilePhone,
   saveLastLotteryResult,
   saveLotteryArchive,
   saveLotteryParticipants,
@@ -222,6 +223,7 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
   const [singleFullName, setSingleFullName] = useState('');
   const [singleCode, setSingleCode] = useState('');
   const [singleCodeType, setSingleCodeType] = useState<LotteryIdentifierType>('PERSONNEL_8');
+  const [singlePhone, setSinglePhone] = useState('');
   const [singleDept, setSingleDept] = useState('');
   const [singleError, setSingleError] = useState('');
   const [bulkText, setBulkText] = useState('');
@@ -244,6 +246,12 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
       return;
     }
 
+    const phoneCheck = normalizeMobilePhone(singlePhone);
+    if (!phoneCheck.isValid) {
+      setSingleError(phoneCheck.error || 'شماره موبایل وارد شده معتبر نیست.');
+      return;
+    }
+
     const duplicate = participants.find(
       (p) => p.identifierCode === validation.code && p.identifierType === validation.type
     );
@@ -260,6 +268,7 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
       fullName: singleFullName.trim(),
       identifierType: validation.type,
       identifierCode: validation.code,
+      phoneNumber: phoneCheck.phone || undefined,
       department: singleDept.trim() || undefined,
       isEligible: true,
       addedAt: new Date().toISOString(),
@@ -268,6 +277,7 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
     setParticipants((prev) => [...prev, nextParticipant]);
     setSingleFullName('');
     setSingleCode('');
+    setSinglePhone('');
     setSingleDept('');
     showFeedback('success', `«${nextParticipant.fullName}» به فهرست قرعه‌کشی اضافه شد.`);
   };
@@ -291,36 +301,79 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
         let skippedInvalid = 0;
         let skippedDuplicate = 0;
 
+        let headerMap: {
+          nameIdx: number;
+          codeIdx: number;
+          phoneIdx: number;
+          deptIdx: number;
+        } | null = null;
+
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
           if (!Array.isArray(row) || row.length < 2) continue;
 
-          // Skip header row if detected
           const firstCell = String(row[0] || '').trim();
           const secondCell = String(row[1] || '').trim();
+
+          // Detect header row and map column indices dynamically
           if (
             i === 0 &&
             (firstCell.includes('ردیف') ||
               firstCell.includes('نام') ||
               secondCell.includes('نام'))
           ) {
+            const headers = row.map((cell) => String(cell || '').trim());
+            const nameIdx = headers.findIndex((h) => h.includes('نام'));
+            const codeIdx = headers.findIndex(
+              (h) => h.includes('کد') || h.includes('پرسنلی') || h.includes('ملی')
+            );
+            const phoneIdx = headers.findIndex(
+              (h) => h.includes('موبایل') || h.includes('همراه') || h.includes('تلفن')
+            );
+            const deptIdx = headers.findIndex(
+              (h) => h.includes('واحد') || h.includes('بخش') || h.includes('دپارتمان')
+            );
+            if (nameIdx !== -1 && codeIdx !== -1) {
+              headerMap = { nameIdx, codeIdx, phoneIdx, deptIdx };
+            }
             continue;
           }
 
           let name = '';
           let rawCode = '';
+          let rawPhone = '';
           let dept = '';
 
-          const isLeadingRowNum =
-            /^\d{1,5}$/.test(toEnglishDigits(firstCell)) && row.length >= 3;
-          if (isLeadingRowNum) {
-            name = String(row[1] || '').trim();
-            rawCode = String(row[2] || '').trim();
-            dept = String(row[3] || '').trim();
+          if (headerMap) {
+            name = String(row[headerMap.nameIdx] || '').trim();
+            rawCode = String(row[headerMap.codeIdx] || '').trim();
+            if (headerMap.phoneIdx !== -1) {
+              rawPhone = String(row[headerMap.phoneIdx] || '').trim();
+            }
+            if (headerMap.deptIdx !== -1) {
+              dept = String(row[headerMap.deptIdx] || '').trim();
+            }
           } else {
-            name = String(row[0] || '').trim();
-            rawCode = String(row[1] || '').trim();
-            dept = String(row[2] || '').trim();
+            const isLeadingRowNum =
+              /^\d{1,5}$/.test(toEnglishDigits(firstCell)) && row.length >= 3;
+            const offset = isLeadingRowNum ? 1 : 0;
+            name = String(row[offset] || '').trim();
+            rawCode = String(row[offset + 1] || '').trim();
+
+            const extraA = String(row[offset + 2] || '').trim();
+            const extraB = String(row[offset + 3] || '').trim();
+            const extraACheck = normalizeMobilePhone(extraA);
+            const extraBCheck = normalizeMobilePhone(extraB);
+
+            if (extraA && extraACheck.isValid && extraACheck.phone) {
+              rawPhone = extraACheck.phone;
+              dept = extraB;
+            } else if (extraB && extraBCheck.isValid && extraBCheck.phone) {
+              dept = extraA;
+              rawPhone = extraBCheck.phone;
+            } else {
+              dept = extraA;
+            }
           }
 
           if (!name || !rawCode) continue;
@@ -338,12 +391,17 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
           }
           existingKeys.add(key);
 
+          const phoneCheck = normalizeMobilePhone(rawPhone);
+          const normalizedPhone =
+            phoneCheck.isValid && phoneCheck.phone ? phoneCheck.phone : undefined;
+
           added.push({
             id: `LOT-P-${Date.now()}-${added.length + 1}`,
             rowNumber: participants.length + added.length + 1,
             fullName: name,
             identifierType: check.type,
             identifierCode: check.code,
+            phoneNumber: normalizedPhone,
             department: dept || undefined,
             isEligible: true,
             addedAt: new Date().toISOString(),
@@ -390,7 +448,7 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
     let invalidCount = 0;
 
     lines.forEach((line) => {
-      // Support formats: "نام و نام خانوادگی, 14021108, واحد" or tab-separated or dash-separated
+      // Support formats: "نام و نام خانوادگی, 14021108, 09121112233, واحد"
       const parts = line.split(/[\t,|؛،-]+/).map((s) => s.trim()).filter(Boolean);
       if (parts.length < 2) {
         invalidCount++;
@@ -412,7 +470,17 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
 
       const remaining = parts.filter((_, idx) => idx !== codeIndex);
       const name = remaining[0] || '';
-      const dept = remaining[1] || '';
+      let phone = '';
+      let dept = '';
+
+      for (const token of remaining.slice(1)) {
+        const pCheck = normalizeMobilePhone(token);
+        if (!phone && pCheck.isValid && pCheck.phone) {
+          phone = pCheck.phone;
+        } else if (!dept) {
+          dept = token;
+        }
+      }
 
       if (!name) {
         invalidCount++;
@@ -429,6 +497,7 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
         fullName: name,
         identifierType: check.type,
         identifierCode: check.code,
+        phoneNumber: phone || undefined,
         department: dept || undefined,
         isEligible: true,
         addedAt: new Date().toISOString(),
@@ -487,6 +556,7 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
       return (
         p.fullName.toLowerCase().includes(q) ||
         p.identifierCode.includes(q) ||
+        (p.phoneNumber || '').includes(q) ||
         (p.department || '').toLowerCase().includes(q)
       );
     });
@@ -508,7 +578,8 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
         item.result.winners.some(
           (w) =>
             w.participant.fullName.toLowerCase().includes(q) ||
-            w.participant.identifierCode.includes(q)
+            w.participant.identifierCode.includes(q) ||
+            (w.participant.phoneNumber || '').includes(q)
         )
       );
     });
@@ -1054,13 +1125,14 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                         برندگان اصلی ({toPersianDigits(lastResult.winners.length)} نفر)
                       </span>
                     </h3>
-                    <div className="border border-slate-800 rounded-xl overflow-hidden">
+                    <div className="border border-slate-800 rounded-xl overflow-x-auto">
                       <table className="w-full text-xs text-right border-collapse">
                         <thead>
                           <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
                             <th className="py-2.5 px-3 w-12 text-center">رتبه</th>
                             <th className="py-2.5 px-3">نام و نام خانوادگی</th>
                             <th className="py-2.5 px-3">کد پرسنلی / ملی</th>
+                            <th className="py-2.5 px-3">شماره موبایل</th>
                             <th className="py-2.5 px-3">واحد</th>
                           </tr>
                         </thead>
@@ -1078,6 +1150,14 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                                 <span className="text-[10px] text-slate-500 block">
                                   {formatIdentifierTypeLabel(w.participant.identifierType)}
                                 </span>
+                              </td>
+                              <td
+                                className="py-2.5 px-3 font-mono tabular-nums text-slate-300 text-right"
+                                dir="ltr"
+                              >
+                                {w.participant.phoneNumber
+                                  ? toPersianDigits(w.participant.phoneNumber)
+                                  : '—'}
                               </td>
                               <td className="py-2.5 px-3 text-slate-300">
                                 {w.participant.department || '—'}
@@ -1097,13 +1177,14 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                         افراد رزرو / علی‌البدل ({toPersianDigits(lastResult.reserves.length)} نفر)
                       </span>
                     </h3>
-                    <div className="border border-slate-800 rounded-xl overflow-hidden">
+                    <div className="border border-slate-800 rounded-xl overflow-x-auto">
                       <table className="w-full text-xs text-right border-collapse">
                         <thead>
                           <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
                             <th className="py-2.5 px-3 w-12 text-center">اولویت</th>
                             <th className="py-2.5 px-3">نام و نام خانوادگی</th>
                             <th className="py-2.5 px-3">کد پرسنلی / ملی</th>
+                            <th className="py-2.5 px-3">شماره موبایل</th>
                             <th className="py-2.5 px-3">واحد</th>
                           </tr>
                         </thead>
@@ -1123,6 +1204,14 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                                     {formatIdentifierTypeLabel(r.participant.identifierType)}
                                   </span>
                                 </td>
+                                <td
+                                  className="py-2.5 px-3 font-mono tabular-nums text-slate-300 text-right"
+                                  dir="ltr"
+                                >
+                                  {r.participant.phoneNumber
+                                    ? toPersianDigits(r.participant.phoneNumber)
+                                    : '—'}
+                                </td>
                                 <td className="py-2.5 px-3 text-slate-300">
                                   {r.participant.department || '—'}
                                 </td>
@@ -1131,7 +1220,7 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                           ) : (
                             <tr>
                               <td
-                                colSpan={4}
+                                colSpan={5}
                                 className="py-6 text-center text-slate-500 text-xs"
                               >
                                 فرد رزرو در تنظیمات این دوره مشخص نشده است.
@@ -1161,7 +1250,7 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                   <span>مدیریت شرکت‌کنندگان در قرعه‌کشی</span>
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  ثبت افراد به صورت تکی یا گروهی (اکسل) با کد پرسنلی ۸ رقمی یا کد ملی ۱۰ رقمی
+                  ثبت افراد به صورت تکی یا گروهی (اکسل) با کد پرسنلی ۸ رقمی یا کد ملی ۱۰ رقمی و شماره موبایل
                 </p>
               </div>
 
@@ -1222,8 +1311,8 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                 <span>افزودن شرکت‌کننده جدید</span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end text-xs">
-                <div className="lg:col-span-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.5fr_1fr_0.9fr_1fr_1.1fr_auto] gap-3 items-end text-xs">
+                <div>
                   <label className="block text-slate-300 font-medium mb-1">
                     نام و نام خانوادگی
                   </label>
@@ -1236,7 +1325,7 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                   />
                 </div>
 
-                <div className="lg:col-span-3">
+                <div>
                   <label className="block text-slate-300 font-medium mb-1">نوع شناسه</label>
                   <select
                     value={singleCodeType}
@@ -1250,7 +1339,7 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                   </select>
                 </div>
 
-                <div className="lg:col-span-2">
+                <div>
                   <label className="block text-slate-300 font-medium mb-1">
                     {singleCodeType === 'PERSONNEL_8'
                       ? 'کد پرسنلی (۸ رقم)'
@@ -1267,7 +1356,22 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                   />
                 </div>
 
-                <div className="lg:col-span-2">
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">
+                    شماره موبایل (اختیاری)
+                  </label>
+                  <input
+                    type="tel"
+                    value={singlePhone}
+                    onChange={(e) => setSinglePhone(e.target.value)}
+                    placeholder="09121234567"
+                    maxLength={13}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono tabular-nums outline-none focus:border-amber-500"
+                    dir="ltr"
+                  />
+                </div>
+
+                <div>
                   <label className="block text-slate-300 font-medium mb-1">
                     واحد / بخش (اختیاری)
                   </label>
@@ -1280,10 +1384,10 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                   />
                 </div>
 
-                <div className="lg:col-span-2">
+                <div>
                   <button
                     type="submit"
-                    className="w-full py-2 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    className="w-full py-2 px-5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
                     <span>ثبت در قرعه</span>
@@ -1304,7 +1408,7 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="جستجو بر اساس نام، کد پرسنلی، کد ملی یا واحد..."
+                  placeholder="جستجو بر اساس نام، کد، شماره موبایل یا واحد..."
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl pr-9 pl-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500"
                 />
               </div>
@@ -1383,6 +1487,7 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                         <th className="py-3 px-4">نام و نام خانوادگی</th>
                         <th className="py-3 px-4">نوع کد</th>
                         <th className="py-3 px-4">کد پرسنلی / کد ملی</th>
+                        <th className="py-3 px-4">شماره موبایل</th>
                         <th className="py-3 px-4">واحد / بخش</th>
                         <th className="py-3 px-4 text-center">حضور در قرعه</th>
                         <th className="py-3 px-4 text-center w-20">حذف</th>
@@ -1400,6 +1505,12 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                           </td>
                           <td className="py-2.5 px-4 font-mono tabular-nums font-bold text-amber-300">
                             {toPersianDigits(p.identifierCode)}
+                          </td>
+                          <td
+                            className="py-2.5 px-4 font-mono tabular-nums text-slate-300 text-right"
+                            dir="ltr"
+                          >
+                            {p.phoneNumber ? toPersianDigits(p.phoneNumber) : '—'}
                           </td>
                           <td className="py-2.5 px-4 text-slate-300">
                             {p.department || '—'}
@@ -1544,13 +1655,14 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                       <Award className="w-4 h-4" />
                       <span>جدول رسمی برندگان اصلی</span>
                     </h3>
-                    <div className="border border-slate-800 rounded-xl overflow-hidden">
+                    <div className="border border-slate-800 rounded-xl overflow-x-auto">
                       <table className="w-full text-xs text-right border-collapse">
                         <thead>
                           <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
                             <th className="py-2.5 px-3 text-center w-12">رتبه</th>
                             <th className="py-2.5 px-3">نام و نام خانوادگی</th>
                             <th className="py-2.5 px-3">نوع و شماره کد</th>
+                            <th className="py-2.5 px-3">شماره موبایل</th>
                             <th className="py-2.5 px-3">واحد</th>
                           </tr>
                         </thead>
@@ -1569,6 +1681,14 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                                   {formatIdentifierTypeLabel(w.participant.identifierType)}
                                 </span>
                               </td>
+                              <td
+                                className="py-2.5 px-3 font-mono tabular-nums text-slate-300 text-right"
+                                dir="ltr"
+                              >
+                                {w.participant.phoneNumber
+                                  ? toPersianDigits(w.participant.phoneNumber)
+                                  : '—'}
+                              </td>
                               <td className="py-2.5 px-3 text-slate-300">
                                 {w.participant.department || '—'}
                               </td>
@@ -1584,13 +1704,14 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                       <UserCheck className="w-4 h-4" />
                       <span>جدول رسمی افراد رزرو (علی‌البدل)</span>
                     </h3>
-                    <div className="border border-slate-800 rounded-xl overflow-hidden">
+                    <div className="border border-slate-800 rounded-xl overflow-x-auto">
                       <table className="w-full text-xs text-right border-collapse">
                         <thead>
                           <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
                             <th className="py-2.5 px-3 text-center w-12">اولویت</th>
                             <th className="py-2.5 px-3">نام و نام خانوادگی</th>
                             <th className="py-2.5 px-3">نوع و شماره کد</th>
+                            <th className="py-2.5 px-3">شماره موبایل</th>
                             <th className="py-2.5 px-3">واحد</th>
                           </tr>
                         </thead>
@@ -1610,6 +1731,14 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                                     {formatIdentifierTypeLabel(r.participant.identifierType)}
                                   </span>
                                 </td>
+                                <td
+                                  className="py-2.5 px-3 font-mono tabular-nums text-slate-300 text-right"
+                                  dir="ltr"
+                                >
+                                  {r.participant.phoneNumber
+                                    ? toPersianDigits(r.participant.phoneNumber)
+                                    : '—'}
+                                </td>
                                 <td className="py-2.5 px-3 text-slate-300">
                                   {r.participant.department || '—'}
                                 </td>
@@ -1618,7 +1747,7 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                           ) : (
                             <tr>
                               <td
-                                colSpan={4}
+                                colSpan={5}
                                 className="py-6 text-center text-slate-500 text-xs"
                               >
                                 فرد رزرو در این دوره تعریف نشده است.
@@ -1889,14 +2018,14 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed">
-              در هر خط، نام و نام خانوادگی، کد پرسنلی ۸ رقمی (یا کد ملی ۱۰ رقمی) و نام واحد را با ویرگول یا خط تیره جدا کنید:
+              در هر خط، نام و نام خانوادگی، کد پرسنلی ۸ رقمی (یا کد ملی ۱۰ رقمی)، شماره موبایل (اختیاری) و نام واحد را با ویرگول یا خط تیره جدا کنید:
             </p>
 
             <textarea
               rows={7}
               value={bulkText}
               onChange={(e) => setBulkText(e.target.value)}
-              placeholder={`محمد امینی, 14021108, فناوری اطلاعات\nزهرا شریفی, 0012345678, امور مالی`}
+              placeholder={`محمد امینی, 14021108, 09121112233, فناوری اطلاعات\nزهرا شریفی, 0012345678, 09123334455, امور مالی`}
               className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white font-mono outline-none focus:border-amber-500"
             />
 
@@ -1947,13 +2076,14 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                   <h4 className="font-bold text-emerald-400">
                     برندگان اصلی ({toPersianDigits(selectedArchive.result.winners.length)} نفر)
                   </h4>
-                  <div className="border border-slate-800 rounded-xl overflow-hidden">
+                  <div className="border border-slate-800 rounded-xl overflow-x-auto">
                     <table className="w-full text-right border-collapse">
                       <thead>
                         <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
                           <th className="py-2 px-3 text-center">رتبه</th>
                           <th className="py-2 px-3">نام</th>
                           <th className="py-2 px-3">کد</th>
+                          <th className="py-2 px-3">موبایل</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/70">
@@ -1968,6 +2098,14 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                             <td className="py-2 px-3 font-mono tabular-nums text-slate-300">
                               {toPersianDigits(w.participant.identifierCode)}
                             </td>
+                            <td
+                              className="py-2 px-3 font-mono tabular-nums text-slate-300 text-right"
+                              dir="ltr"
+                            >
+                              {w.participant.phoneNumber
+                                ? toPersianDigits(w.participant.phoneNumber)
+                                : '—'}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -1979,13 +2117,14 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                   <h4 className="font-bold text-amber-400">
                     افراد رزرو ({toPersianDigits(selectedArchive.result.reserves.length)} نفر)
                   </h4>
-                  <div className="border border-slate-800 rounded-xl overflow-hidden">
+                  <div className="border border-slate-800 rounded-xl overflow-x-auto">
                     <table className="w-full text-right border-collapse">
                       <thead>
                         <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
                           <th className="py-2 px-3 text-center">اولویت</th>
                           <th className="py-2 px-3">نام</th>
                           <th className="py-2 px-3">کد</th>
+                          <th className="py-2 px-3">موبایل</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/70">
@@ -2001,11 +2140,19 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                               <td className="py-2 px-3 font-mono tabular-nums text-slate-300">
                                 {toPersianDigits(r.participant.identifierCode)}
                               </td>
+                              <td
+                                className="py-2 px-3 font-mono tabular-nums text-slate-300 text-right"
+                                dir="ltr"
+                              >
+                                {r.participant.phoneNumber
+                                  ? toPersianDigits(r.participant.phoneNumber)
+                                  : '—'}
+                              </td>
                             </tr>
                           ))
                         ) : (
                           <tr>
-                            <td colSpan={3} className="py-4 text-center text-slate-500">
+                            <td colSpan={4} className="py-4 text-center text-slate-500">
                               ندارد
                             </td>
                           </tr>

@@ -19,6 +19,7 @@ export function printLotteryMinutes(
         <td><strong>${escapeHtml(w.participant.fullName)}</strong></td>
         <td style="text-align:center;">${formatIdentifierTypeLabel(w.participant.identifierType)}</td>
         <td style="text-align:center;font-family:monospace;font-weight:bold;direction:ltr;">${toPersianDigits(w.participant.identifierCode)}</td>
+        <td style="text-align:center;font-family:monospace;direction:ltr;">${w.participant.phoneNumber ? toPersianDigits(w.participant.phoneNumber) : '—'}</td>
         <td>${escapeHtml(w.participant.department || '—')}</td>
         <td style="text-align:center;font-weight:bold;">برنده اصلی</td>
       </tr>
@@ -36,13 +37,14 @@ export function printLotteryMinutes(
             <td><strong>${escapeHtml(r.participant.fullName)}</strong></td>
             <td style="text-align:center;">${formatIdentifierTypeLabel(r.participant.identifierType)}</td>
             <td style="text-align:center;font-family:monospace;font-weight:bold;direction:ltr;">${toPersianDigits(r.participant.identifierCode)}</td>
+            <td style="text-align:center;font-family:monospace;direction:ltr;">${r.participant.phoneNumber ? toPersianDigits(r.participant.phoneNumber) : '—'}</td>
             <td>${escapeHtml(r.participant.department || '—')}</td>
             <td style="text-align:center;">رزرو (علی‌البدل)</td>
           </tr>
         `
           )
           .join('')
-      : `<tr><td colspan="6" style="text-align:center;color:#555;">فرد رزرو در تنظیمات این دوره تعریف نشده است.</td></tr>`;
+      : `<tr><td colspan="7" style="text-align:center;color:#555;">فرد رزرو در تنظیمات این دوره تعریف نشده است.</td></tr>`;
 
   const html = `
     <!DOCTYPE html>
@@ -181,12 +183,13 @@ export function printLotteryMinutes(
           <table>
             <thead>
               <tr>
-                <th style="width:45px;text-align:center;">رتبه</th>
+                <th style="width:40px;text-align:center;">رتبه</th>
                 <th>نام و نام خانوادگی</th>
-                <th style="width:110px;text-align:center;">نوع کد</th>
-                <th style="width:105px;text-align:center;">کد پرسنلی / ملی</th>
+                <th style="width:95px;text-align:center;">نوع کد</th>
+                <th style="width:90px;text-align:center;">کد پرسنلی / ملی</th>
+                <th style="width:88px;text-align:center;">شماره موبایل</th>
                 <th>واحد / بخش</th>
-                <th style="width:85px;text-align:center;">وضعیت</th>
+                <th style="width:75px;text-align:center;">وضعیت</th>
               </tr>
             </thead>
             <tbody>
@@ -198,12 +201,13 @@ export function printLotteryMinutes(
           <table>
             <thead>
               <tr>
-                <th style="width:45px;text-align:center;">اولویت</th>
+                <th style="width:40px;text-align:center;">اولویت</th>
                 <th>نام و نام خانوادگی</th>
-                <th style="width:110px;text-align:center;">نوع کد</th>
-                <th style="width:105px;text-align:center;">کد پرسنلی / ملی</th>
+                <th style="width:95px;text-align:center;">نوع کد</th>
+                <th style="width:90px;text-align:center;">کد پرسنلی / ملی</th>
+                <th style="width:88px;text-align:center;">شماره موبایل</th>
                 <th>واحد / بخش</th>
-                <th style="width:85px;text-align:center;">وضعیت</th>
+                <th style="width:75px;text-align:center;">وضعیت</th>
               </tr>
             </thead>
             <tbody>

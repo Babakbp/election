@@ -184,6 +184,34 @@ export function formatIdentifierTypeLabel(type: LotteryIdentifierType): string {
 }
 
 /**
+ * Normalize Iranian mobile number (handles Persian digits and missing leading zero from Excel).
+ */
+export function normalizeMobilePhone(rawPhone: string | undefined | null): {
+  isValid: boolean;
+  phone: string;
+  error?: string;
+} {
+  const digits = toEnglishDigits(String(rawPhone || '')).replace(/\D/g, '');
+  if (!digits) {
+    return { isValid: true, phone: '' };
+  }
+  if (/^09\d{9}$/.test(digits)) {
+    return { isValid: true, phone: digits };
+  }
+  if (/^9\d{9}$/.test(digits)) {
+    return { isValid: true, phone: `0${digits}` };
+  }
+  if (/^989\d{9}$/.test(digits)) {
+    return { isValid: true, phone: `0${digits.slice(2)}` };
+  }
+  return {
+    isValid: false,
+    phone: digits,
+    error: 'شماره موبایل معتبر نیست (باید ۱۱ رقم و با ۰۹ شروع شود، مثلاً 09121234567).',
+  };
+}
+
+/**
  * Cryptographically secure unbiased integer in [0, maxExclusive)
  * using rejection sampling over Web Crypto API.
  */
@@ -283,20 +311,21 @@ export function createSampleLotteryParticipants(): LotteryParticipant[] {
     fullName: string;
     identifierType: LotteryIdentifierType;
     identifierCode: string;
+    phoneNumber: string;
     department: string;
   }> = [
-    { fullName: 'امیرحسین رضایی', identifierType: 'PERSONNEL_8', identifierCode: '14021108', department: 'واحد فنی و مهندسی' },
-    { fullName: 'فاطمه مرادی', identifierType: 'PERSONNEL_8', identifierCode: '14021145', department: 'امور مالی و اداری' },
-    { fullName: 'علی‌اصغر کریمی', identifierType: 'PERSONNEL_8', identifierCode: '14021209', department: 'فناوری اطلاعات' },
-    { fullName: 'زهرا حسینی مقدم', identifierType: 'NATIONAL_10', identifierCode: '0012345678', department: 'روابط عمومی' },
-    { fullName: 'مهدی باقری', identifierType: 'PERSONNEL_8', identifierCode: '14021314', department: 'تولید و عملیات' },
-    { fullName: 'سارا احمدی نیا', identifierType: 'NATIONAL_10', identifierCode: '0023456789', department: 'منابع انسانی' },
-    { fullName: 'حسین محمدی', identifierType: 'PERSONNEL_8', identifierCode: '14021422', department: 'کنترل کیفیت' },
-    { fullName: 'مریم کاظمی', identifierType: 'PERSONNEL_8', identifierCode: '14021536', department: 'پشتیبانی و تدارکات' },
-    { fullName: 'رضا جعفری', identifierType: 'NATIONAL_10', identifierCode: '0034567890', department: 'حراست و بازرسی' },
-    { fullName: 'نرگس طاهری', identifierType: 'PERSONNEL_8', identifierCode: '14021671', department: 'آموزش و پژوهش' },
-    { fullName: 'سعید رحیمی', identifierType: 'PERSONNEL_8', identifierCode: '14021788', department: 'برنامه‌ریزی' },
-    { fullName: 'لیلا صادقی', identifierType: 'NATIONAL_10', identifierCode: '0045678901', department: 'امور رفاهی' },
+    { fullName: 'امیرحسین رضایی', identifierType: 'PERSONNEL_8', identifierCode: '14021108', phoneNumber: '09121112201', department: 'واحد فنی و مهندسی' },
+    { fullName: 'فاطمه مرادی', identifierType: 'PERSONNEL_8', identifierCode: '14021145', phoneNumber: '09121112202', department: 'امور مالی و اداری' },
+    { fullName: 'علی‌اصغر کریمی', identifierType: 'PERSONNEL_8', identifierCode: '14021209', phoneNumber: '09121112203', department: 'فناوری اطلاعات' },
+    { fullName: 'زهرا حسینی مقدم', identifierType: 'NATIONAL_10', identifierCode: '0012345678', phoneNumber: '09121112204', department: 'روابط عمومی' },
+    { fullName: 'مهدی باقری', identifierType: 'PERSONNEL_8', identifierCode: '14021314', phoneNumber: '09121112205', department: 'تولید و عملیات' },
+    { fullName: 'سارا احمدی نیا', identifierType: 'NATIONAL_10', identifierCode: '0023456789', phoneNumber: '09121112206', department: 'منابع انسانی' },
+    { fullName: 'حسین محمدی', identifierType: 'PERSONNEL_8', identifierCode: '14021422', phoneNumber: '09121112207', department: 'کنترل کیفیت' },
+    { fullName: 'مریم کاظمی', identifierType: 'PERSONNEL_8', identifierCode: '14021536', phoneNumber: '09121112208', department: 'پشتیبانی و تدارکات' },
+    { fullName: 'رضا جعفری', identifierType: 'NATIONAL_10', identifierCode: '0034567890', phoneNumber: '09121112209', department: 'حراست و بازرسی' },
+    { fullName: 'نرگس طاهری', identifierType: 'PERSONNEL_8', identifierCode: '14021671', phoneNumber: '09121112210', department: 'آموزش و پژوهش' },
+    { fullName: 'سعید رحیمی', identifierType: 'PERSONNEL_8', identifierCode: '14021788', phoneNumber: '09121112211', department: 'برنامه‌ریزی' },
+    { fullName: 'لیلا صادقی', identifierType: 'NATIONAL_10', identifierCode: '0045678901', phoneNumber: '09121112212', department: 'امور رفاهی' },
   ];
 
   return samples.map((s, idx) => ({
@@ -305,6 +334,7 @@ export function createSampleLotteryParticipants(): LotteryParticipant[] {
     fullName: s.fullName,
     identifierType: s.identifierType,
     identifierCode: s.identifierCode,
+    phoneNumber: s.phoneNumber,
     department: s.department,
     isEligible: true,
     addedAt: now,
@@ -330,16 +360,22 @@ function downloadLotteryWorkbook(workbook: XLSX.WorkBook, filename: string) {
 }
 
 /**
- * Export Excel template for importing lottery participants (8-digit personnel code or 10-digit national ID)
+ * Export Excel template for importing lottery participants (8-digit personnel code or 10-digit national ID + mobile phone)
  */
 export function exportLotteryParticipantsTemplateToExcel() {
   const wb = XLSX.utils.book_new();
-  const headers = ['ردیف', 'نام و نام خانوادگی', 'کد پرسنلی ۸ رقمی یا کد ملی ۱۰ رقمی', 'واحد / بخش'];
+  const headers = [
+    'ردیف',
+    'نام و نام خانوادگی',
+    'کد پرسنلی ۸ رقمی یا کد ملی ۱۰ رقمی',
+    'شماره موبایل',
+    'واحد / بخش',
+  ];
   const rows = [
-    [1, 'محمد امینی', '14030125', 'فناوری اطلاعات'],
-    [2, 'زهرا شریفی', '14030289', 'امور مالی'],
-    [3, 'علی ناصری', '0012345678', 'روابط عمومی'],
-    [4, 'فاطمه قاسمی', '14030412', 'منابع انسانی'],
+    [1, 'محمد امینی', '14030125', '09121112233', 'فناوری اطلاعات'],
+    [2, 'زهرا شریفی', '14030289', '09122223344', 'امور مالی'],
+    [3, 'علی ناصری', '0012345678', '09123334455', 'روابط عمومی'],
+    [4, 'فاطمه قاسمی', '14030412', '09124445566', 'منابع انسانی'],
   ];
   const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
   XLSX.utils.book_append_sheet(wb, ws, 'فهرست شرکت‌کنندگان');
@@ -373,25 +409,43 @@ export function exportLotteryResultsToExcel(
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), 'خلاصه دوره');
 
   // Sheet 2: Main Winners
-  const winnerHeaders = ['رتبه انتخاب', 'وضعیت', 'نام و نام خانوادگی', 'نوع شناسه', 'کد پرسنلی / کد ملی', 'واحد / بخش'];
+  const winnerHeaders = [
+    'رتبه انتخاب',
+    'وضعیت',
+    'نام و نام خانوادگی',
+    'نوع شناسه',
+    'کد پرسنلی / کد ملی',
+    'شماره موبایل',
+    'واحد / بخش',
+  ];
   const winnerRows = result.winners.map((w) => [
     w.rank,
     'برنده اصلی (منتخب)',
     w.participant.fullName,
     formatIdentifierTypeLabel(w.participant.identifierType),
     w.participant.identifierCode,
+    w.participant.phoneNumber || '—',
     w.participant.department || '—',
   ]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([winnerHeaders, ...winnerRows]), 'برندگان اصلی');
 
   // Sheet 3: Reserve List
-  const reserveHeaders = ['اولویت رزرو', 'وضعیت', 'نام و نام خانوادگی', 'نوع شناسه', 'کد پرسنلی / کد ملی', 'واحد / بخش'];
+  const reserveHeaders = [
+    'اولویت رزرو',
+    'وضعیت',
+    'نام و نام خانوادگی',
+    'نوع شناسه',
+    'کد پرسنلی / کد ملی',
+    'شماره موبایل',
+    'واحد / بخش',
+  ];
   const reserveRows = result.reserves.map((r) => [
     r.rank,
     'رزرو (علی‌البدل)',
     r.participant.fullName,
     formatIdentifierTypeLabel(r.participant.identifierType),
     r.participant.identifierCode,
+    r.participant.phoneNumber || '—',
     r.participant.department || '—',
   ]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([reserveHeaders, ...reserveRows]), 'افراد رزرو');
@@ -400,7 +454,15 @@ export function exportLotteryResultsToExcel(
   if (allParticipants.length > 0) {
     const winnerIds = new Set(result.winners.map((w) => w.participant.id));
     const reserveIds = new Set(result.reserves.map((r) => r.participant.id));
-    const poolHeaders = ['ردیف', 'نام و نام خانوادگی', 'نوع شناسه', 'کد پرسنلی / کد ملی', 'واحد / بخش', 'نتیجه در قرعه'];
+    const poolHeaders = [
+      'ردیف',
+      'نام و نام خانوادگی',
+      'نوع شناسه',
+      'کد پرسنلی / کد ملی',
+      'شماره موبایل',
+      'واحد / بخش',
+      'نتیجه در قرعه',
+    ];
     const poolRows = allParticipants.map((p) => {
       let status = p.isEligible ? 'عدم انتخاب' : 'غیرفعال';
       if (winnerIds.has(p.id)) {
@@ -415,6 +477,7 @@ export function exportLotteryResultsToExcel(
         p.fullName,
         formatIdentifierTypeLabel(p.identifierType),
         p.identifierCode,
+        p.phoneNumber || '—',
         p.department || '—',
         status,
       ];
