@@ -105,6 +105,10 @@ export function saveLotteryArchive(round: ArchivedLotteryRound): ArchivedLottery
   return updated;
 }
 
+export function saveAllLotteryArchives(archives: ArchivedLotteryRound[]): void {
+  localStorage.setItem(STORAGE_KEY_LOTTERY_ARCHIVES, JSON.stringify(archives));
+}
+
 export function deleteLotteryArchive(archiveId: string): ArchivedLotteryRound[] {
   const existing = loadLotteryArchives();
   const updated = existing.filter((item) => item.id !== archiveId);
@@ -360,6 +364,15 @@ function downloadLotteryWorkbook(workbook: XLSX.WorkBook, filename: string) {
 }
 
 /**
+ * Apply RTL view and comfortable column widths to an XLSX worksheet.
+ */
+function configureRtlWorksheet(ws: XLSX.WorkSheet, colWidths: number[]): XLSX.WorkSheet {
+  ws['!views'] = [{ rightToLeft: true }];
+  ws['!cols'] = colWidths.map((wch) => ({ wch }));
+  return ws;
+}
+
+/**
  * Export Excel template for importing lottery participants (8-digit personnel code or 10-digit national ID + mobile phone)
  */
 export function exportLotteryParticipantsTemplateToExcel() {
@@ -377,7 +390,10 @@ export function exportLotteryParticipantsTemplateToExcel() {
     [3, 'علی ناصری', '0012345678', '09123334455', 'روابط عمومی'],
     [4, 'فاطمه قاسمی', '14030412', '09124445566', 'منابع انسانی'],
   ];
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  const ws = configureRtlWorksheet(
+    XLSX.utils.aoa_to_sheet([headers, ...rows]),
+    [8, 26, 32, 18, 24]
+  );
   XLSX.utils.book_append_sheet(wb, ws, 'فهرست شرکت‌کنندگان');
   downloadLotteryWorkbook(wb, 'قالب_ورود_شرکت_کنندگان_قرعه_کشی.xlsx');
 }
@@ -391,64 +407,96 @@ export function exportLotteryResultsToExcel(
 ) {
   const wb = XLSX.utils.book_new();
 
-  // Sheet 1: Summary
-  const summaryRows = [
-    ['گزارش رسمی نتایج قرعه‌کشی', ''],
-    ['عنوان دوره قرعه‌کشی', result.settings.title],
-    ['سازمان / نهاد برگزارکننده', result.settings.organization],
-    ['کد دوره', result.settings.roundCode],
-    ['تاریخ و زمان اجرا (شمسی)', result.persianDrawnAt],
-    ['تعداد کل شرکت‌کنندگان ثبت‌شده', result.totalParticipantsCount],
-    ['تعداد واجدین شرایط شرکت در قرعه', result.eligibleParticipantsCount],
-    ['تعداد افراد انتخابی (برندگان اصلی)', result.winners.length],
-    ['تعداد افراد رزرو (علی‌البدل)', result.reserves.length],
-    ['مدت چرخش چرخ قرعه‌کشی (ثانیه)', result.settings.spinDurationSeconds],
-    ['الگوریتم تصادفی‌سازی', result.algorithmInfo],
-    ['کد اصالت و یکپارچگی (SHA-256)', result.integrityHash],
-  ];
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), 'خلاصه دوره');
-
-  // Sheet 2: Main Winners
-  const winnerHeaders = [
-    'رتبه انتخاب',
-    'وضعیت',
+  const detailHeaders = [
+    'رتبه / اولویت',
+    'وضعیت انتخاب',
     'نام و نام خانوادگی',
     'نوع شناسه',
     'کد پرسنلی / کد ملی',
     'شماره موبایل',
     'واحد / بخش',
   ];
+
   const winnerRows = result.winners.map((w) => [
     w.rank,
-    'برنده اصلی (منتخب)',
+    'انتخاب شده (برنده اصلی)',
     w.participant.fullName,
     formatIdentifierTypeLabel(w.participant.identifierType),
     w.participant.identifierCode,
     w.participant.phoneNumber || '—',
     w.participant.department || '—',
   ]);
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([winnerHeaders, ...winnerRows]), 'برندگان اصلی');
 
-  // Sheet 3: Reserve List
-  const reserveHeaders = [
-    'اولویت رزرو',
-    'وضعیت',
-    'نام و نام خانوادگی',
-    'نوع شناسه',
-    'کد پرسنلی / کد ملی',
-    'شماره موبایل',
-    'واحد / بخش',
-  ];
   const reserveRows = result.reserves.map((r) => [
     r.rank,
-    'رزرو (علی‌البدل)',
+    'علی‌البدل (رزرو)',
     r.participant.fullName,
     formatIdentifierTypeLabel(r.participant.identifierType),
     r.participant.identifierCode,
     r.participant.phoneNumber || '—',
     r.participant.department || '—',
   ]);
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([reserveHeaders, ...reserveRows]), 'افراد رزرو');
+
+  // Sheet 1: Combined immediately visible report (Draw Info + Selected Winners + Alternates/Reserves)
+  const combinedSheetRows: (string | number)[][] = [
+    ['گزارش رسمی نتایج قرعه‌کشی — فهرست افراد انتخاب‌شده و علی‌البدل'],
+    ['عنوان دوره قرعه‌کشی', result.settings.title, '', 'سازمان / برگزارکننده', result.settings.organization],
+    ['کد دوره', result.settings.roundCode, '', 'تاریخ و زمان اجرا (شمسی)', result.persianDrawnAt],
+    [
+      'تعداد کل ثبت‌نام‌شدگان',
+      result.totalParticipantsCount,
+      '',
+      'واجدین شرایط در قرعه',
+      result.eligibleParticipantsCount,
+    ],
+    [
+      'تعداد افراد انتخاب‌شده (اصلی)',
+      result.winners.length,
+      '',
+      'تعداد افراد علی‌البدل (رزرو)',
+      result.reserves.length,
+    ],
+    ['مدت چرخش چرخ (ثانیه)', result.settings.spinDurationSeconds, '', 'الگوریتم تصادفی‌سازی', result.algorithmInfo],
+    ['کد اصالت و یکپارچگی (SHA-256)', result.integrityHash],
+    [],
+    [`افراد انتخاب شده — برندگان اصلی (${result.winners.length} نفر)`],
+    detailHeaders,
+    ...winnerRows,
+    [],
+    [`افراد علی‌البدل — رزرو (${result.reserves.length} نفر)`],
+    detailHeaders,
+    ...(reserveRows.length > 0
+      ? reserveRows
+      : [['—', 'علی‌البدل (رزرو)', 'در تنظیمات این دوره فرد علی‌البدل تعریف نشده است.', '—', '—', '—', '—']]),
+  ];
+
+  const combinedWs = configureRtlWorksheet(
+    XLSX.utils.aoa_to_sheet(combinedSheetRows),
+    [18, 26, 28, 22, 22, 18, 24]
+  );
+  XLSX.utils.book_append_sheet(wb, combinedWs, 'نتایج منتخبین و علی‌البدل');
+
+  // Sheet 2: Main Winners (Dedicated)
+  const winnersWs = configureRtlWorksheet(
+    XLSX.utils.aoa_to_sheet([
+      ['رتبه انتخاب', 'وضعیت', 'نام و نام خانوادگی', 'نوع شناسه', 'کد پرسنلی / کد ملی', 'شماره موبایل', 'واحد / بخش'],
+      ...winnerRows,
+    ]),
+    [14, 24, 28, 22, 22, 18, 24]
+  );
+  XLSX.utils.book_append_sheet(wb, winnersWs, 'برندگان اصلی');
+
+  // Sheet 3: Reserve / Alternate List (Dedicated)
+  const reservesWs = configureRtlWorksheet(
+    XLSX.utils.aoa_to_sheet([
+      ['اولویت علی‌البدل', 'وضعیت', 'نام و نام خانوادگی', 'نوع شناسه', 'کد پرسنلی / کد ملی', 'شماره موبایل', 'واحد / بخش'],
+      ...(reserveRows.length > 0
+        ? reserveRows
+        : [['—', 'علی‌البدل (رزرو)', 'در این دوره فرد علی‌البدل تعریف نشده است.', '—', '—', '—', '—']]),
+    ]),
+    [16, 22, 28, 22, 22, 18, 24]
+  );
+  XLSX.utils.book_append_sheet(wb, reservesWs, 'افراد علی‌البدل (رزرو)');
 
   // Sheet 4: Full Participants Pool
   if (allParticipants.length > 0) {
@@ -470,7 +518,7 @@ export function exportLotteryResultsToExcel(
         status = `برنده اصلی (نفر ${toPersianDigits(w?.rank || 1)})`;
       } else if (reserveIds.has(p.id)) {
         const r = result.reserves.find((x) => x.participant.id === p.id);
-        status = `رزرو (اولویت ${toPersianDigits(r?.rank || 1)})`;
+        status = `علی‌البدل / رزرو (اولویت ${toPersianDigits(r?.rank || 1)})`;
       }
       return [
         p.rowNumber,
@@ -482,7 +530,11 @@ export function exportLotteryResultsToExcel(
         status,
       ];
     });
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([poolHeaders, ...poolRows]), 'فهرست کامل شرکت‌کنندگان');
+    const poolWs = configureRtlWorksheet(
+      XLSX.utils.aoa_to_sheet([poolHeaders, ...poolRows]),
+      [10, 28, 22, 22, 18, 24, 28]
+    );
+    XLSX.utils.book_append_sheet(wb, poolWs, 'فهرست کامل شرکت‌کنندگان');
   }
 
   downloadLotteryWorkbook(
@@ -511,4 +563,228 @@ export function downloadLotteryJsonBackup(result: LotteryDrawResult, allParticip
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+/**
+ * Download complete JSON backup of the entire Lottery Panel (settings, participants, active result, and all archived rounds)
+ */
+export function downloadFullLotteryJsonBackup(params: {
+  settings: LotterySettings;
+  participants: LotteryParticipant[];
+  lastResult: LotteryDrawResult | null;
+  archives: ArchivedLotteryRound[];
+}) {
+  const payload = {
+    type: 'INDEPENDENT_LOTTERY_FULL_BACKUP',
+    version: '1.0.0',
+    exportedAt: new Date().toISOString(),
+    settings: params.settings,
+    participants: params.participants,
+    lastResult: params.lastResult,
+    archives: params.archives,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `پشتیبان_کامل_قرعه_کشی_${params.settings.roundCode || 'سامانه'}_${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+export type ParsedLotteryBackup =
+  | {
+      kind: 'SINGLE_ROUND';
+      exportedAt?: string;
+      result: LotteryDrawResult;
+      allParticipants: LotteryParticipant[];
+    }
+  | {
+      kind: 'FULL_PANEL';
+      exportedAt?: string;
+      settings: LotterySettings;
+      participants: LotteryParticipant[];
+      lastResult: LotteryDrawResult | null;
+      archives: ArchivedLotteryRound[];
+    };
+
+function sanitizeParticipantRecord(raw: any, fallbackIndex: number): LotteryParticipant | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const fullName = String(raw.fullName || '').trim();
+  const codeCheck = normalizeAndValidateLotteryCode(
+    String(raw.identifierCode || ''),
+    raw.identifierType === 'PERSONNEL_8' || raw.identifierType === 'NATIONAL_10'
+      ? raw.identifierType
+      : undefined
+  );
+  if (!fullName || !codeCheck.isValid) return null;
+
+  const phoneCheck = normalizeMobilePhone(raw.phoneNumber);
+  return {
+    id: String(raw.id || `LOT-P-${Date.now()}-${fallbackIndex}`),
+    rowNumber: typeof raw.rowNumber === 'number' && raw.rowNumber > 0 ? raw.rowNumber : fallbackIndex + 1,
+    fullName,
+    identifierType: codeCheck.type,
+    identifierCode: codeCheck.code,
+    phoneNumber: phoneCheck.isValid && phoneCheck.phone ? phoneCheck.phone : undefined,
+    department: raw.department ? String(raw.department).trim() : undefined,
+    isEligible: typeof raw.isEligible === 'boolean' ? raw.isEligible : true,
+    addedAt: String(raw.addedAt || new Date().toISOString()),
+  };
+}
+
+function sanitizeDrawResultRecord(raw: any): LotteryDrawResult | null {
+  if (!raw || typeof raw !== 'object') return null;
+  if (!Array.isArray(raw.winners) || !raw.settings || typeof raw.settings !== 'object') {
+    return null;
+  }
+
+  const defaults = getDefaultLotterySettings();
+  const mergedSettings: LotterySettings = {
+    ...defaults,
+    ...raw.settings,
+  };
+
+  const sanitizeEntries = (list: any[], role: 'WINNER' | 'RESERVE'): LotterySelectedEntry[] => {
+    if (!Array.isArray(list)) return [];
+    const output: LotterySelectedEntry[] = [];
+    list.forEach((entry, idx) => {
+      const p = sanitizeParticipantRecord(entry?.participant || entry, idx);
+      if (!p) return;
+      output.push({
+        rank: typeof entry?.rank === 'number' && entry.rank > 0 ? entry.rank : output.length + 1,
+        role: entry?.role === 'WINNER' || entry?.role === 'RESERVE' ? entry.role : role,
+        participant: p,
+      });
+    });
+    return output;
+  };
+
+  const winners = sanitizeEntries(raw.winners, 'WINNER');
+  const reserves = sanitizeEntries(raw.reserves || [], 'RESERVE');
+
+  return {
+    id: String(raw.id || `LOT-DRAW-${Date.now()}`),
+    drawnAt: String(raw.drawnAt || new Date().toISOString()),
+    persianDrawnAt: String(raw.persianDrawnAt || formatJalali(new Date(), true)),
+    settings: mergedSettings,
+    totalParticipantsCount:
+      typeof raw.totalParticipantsCount === 'number'
+        ? raw.totalParticipantsCount
+        : winners.length + reserves.length,
+    eligibleParticipantsCount:
+      typeof raw.eligibleParticipantsCount === 'number'
+        ? raw.eligibleParticipantsCount
+        : winners.length + reserves.length,
+    winners,
+    reserves,
+    integrityHash: String(raw.integrityHash || 'IMPORTED-BACKUP'),
+    algorithmInfo: String(
+      raw.algorithmInfo || 'Web Crypto CSPRNG (crypto.getRandomValues) + Fisher-Yates Unbiased Shuffle'
+    ),
+  };
+}
+
+/**
+ * Parse and validate an imported JSON backup file (either single-round or full-panel lottery backup).
+ */
+export function parseLotteryJsonBackup(rawText: string):
+  | { ok: true; data: ParsedLotteryBackup }
+  | { ok: false; error: string } {
+  try {
+    const parsed = JSON.parse(rawText);
+    if (!parsed || typeof parsed !== 'object') {
+      return { ok: false, error: 'ساختار فایل JSON انتخاب‌شده معتبر نیست.' };
+    }
+
+    // Case 1: Full-panel backup
+    if (
+      parsed.type === 'INDEPENDENT_LOTTERY_FULL_BACKUP' ||
+      (Array.isArray(parsed.archives) && (Array.isArray(parsed.participants) || parsed.settings))
+    ) {
+      const defaults = getDefaultLotterySettings();
+      const settings: LotterySettings = {
+        ...defaults,
+        ...(parsed.settings && typeof parsed.settings === 'object' ? parsed.settings : {}),
+      };
+      const participants: LotteryParticipant[] = Array.isArray(parsed.participants)
+        ? parsed.participants
+            .map((p: any, idx: number) => sanitizeParticipantRecord(p, idx))
+            .filter((x: LotteryParticipant | null): x is LotteryParticipant => x !== null)
+            .map((p: LotteryParticipant, idx: number) => ({ ...p, rowNumber: idx + 1 }))
+        : [];
+      const lastResult = parsed.lastResult ? sanitizeDrawResultRecord(parsed.lastResult) : null;
+      const archives: ArchivedLotteryRound[] = Array.isArray(parsed.archives)
+        ? parsed.archives
+            .map((arch: any, idx: number): ArchivedLotteryRound | null => {
+              const res = sanitizeDrawResultRecord(arch?.result);
+              if (!res) return null;
+              const archParticipants = Array.isArray(arch?.allParticipants)
+                ? arch.allParticipants
+                    .map((p: any, pIdx: number) => sanitizeParticipantRecord(p, pIdx))
+                    .filter((x: LotteryParticipant | null): x is LotteryParticipant => x !== null)
+                : [];
+              return {
+                id: String(arch.id || `LOT-ARCH-${Date.now()}-${idx}`),
+                archivedAt: String(arch.archivedAt || res.drawnAt),
+                persianArchivedDate: String(arch.persianArchivedDate || res.persianDrawnAt),
+                result: res,
+                allParticipants: archParticipants,
+                notes: arch.notes ? String(arch.notes) : undefined,
+              };
+            })
+            .filter((x: ArchivedLotteryRound | null): x is ArchivedLotteryRound => x !== null)
+        : [];
+
+      return {
+        ok: true,
+        data: {
+          kind: 'FULL_PANEL',
+          exportedAt: parsed.exportedAt ? String(parsed.exportedAt) : undefined,
+          settings,
+          participants,
+          lastResult,
+          archives,
+        },
+      };
+    }
+
+    // Case 2: Single-round backup (standard INDEPENDENT_LOTTERY_BACKUP or ArchivedLotteryRound)
+    const rawResult = parsed.result || (Array.isArray(parsed.winners) ? parsed : null);
+    const sanitizedResult = sanitizeDrawResultRecord(rawResult);
+    if (sanitizedResult) {
+      const rawPool = Array.isArray(parsed.allParticipants)
+        ? parsed.allParticipants
+        : Array.isArray(parsed.participants)
+          ? parsed.participants
+          : [];
+      const allParticipants: LotteryParticipant[] = rawPool
+        .map((p: any, idx: number) => sanitizeParticipantRecord(p, idx))
+        .filter((x: LotteryParticipant | null): x is LotteryParticipant => x !== null)
+        .map((p: LotteryParticipant, idx: number) => ({ ...p, rowNumber: idx + 1 }));
+
+      return {
+        ok: true,
+        data: {
+          kind: 'SINGLE_ROUND',
+          exportedAt: parsed.exportedAt ? String(parsed.exportedAt) : undefined,
+          result: sanitizedResult,
+          allParticipants,
+        },
+      };
+    }
+
+    return {
+      ok: false,
+      error:
+        'فایل انتخاب‌شده یک فایل پشتیبان معتبر سامانه قرعه‌کشی نیست (داده‌های نتیجه یا بایگانی یافت نشد).',
+    };
+  } catch {
+    return {
+      ok: false,
+      error: 'امکان خواندن فایل JSON وجود ندارد. لطفاً از سالم بودن فایل پشتیبان اطمینان حاصل کنید.',
+    };
+  }
 }

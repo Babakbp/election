@@ -11,6 +11,7 @@ import {
 import {
   createSampleLotteryParticipants,
   deleteLotteryArchive,
+  downloadFullLotteryJsonBackup,
   downloadLotteryJsonBackup,
   executeCryptographicLotteryDraw,
   exportLotteryParticipantsTemplateToExcel,
@@ -22,6 +23,9 @@ import {
   loadLotterySettings,
   normalizeAndValidateLotteryCode,
   normalizeMobilePhone,
+  ParsedLotteryBackup,
+  parseLotteryJsonBackup,
+  saveAllLotteryArchives,
   saveLastLotteryResult,
   saveLotteryArchive,
   saveLotteryParticipants,
@@ -31,6 +35,7 @@ import { formatJalali, toEnglishDigits, toPersianDigits } from '../../utils/pers
 import { LotteryWheel } from './LotteryWheel';
 import { printLotteryMinutes } from './lotteryPrint';
 import {
+  AlertTriangle,
   Archive,
   ArrowRight,
   Award,
@@ -39,6 +44,7 @@ import {
   Dices,
   Download,
   Eye,
+  FileJson,
   FileSpreadsheet,
   FileText,
   Maximize,
@@ -46,6 +52,7 @@ import {
   Play,
   Plus,
   Printer,
+  RefreshCw,
   RotateCcw,
   Search,
   Settings,
@@ -562,10 +569,18 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
     });
   }, [participants, filterType, searchQuery]);
 
-  // ---------------- Archive State ----------------
+  // ---------------- Archive & JSON Backup Restore State ----------------
   const [archiveSearch, setArchiveSearch] = useState('');
   const [selectedArchive, setSelectedArchive] = useState<ArchivedLotteryRound | null>(null);
   const [deleteArchiveConfirmId, setDeleteArchiveConfirmId] = useState<string | null>(null);
+  const [restoreWorkspaceConfirmId, setRestoreWorkspaceConfirmId] = useState<string | null>(null);
+  const jsonBackupFileRef = useRef<HTMLInputElement | null>(null);
+  const [pendingJsonBackup, setPendingJsonBackup] = useState<{
+    fileName: string;
+    data: ParsedLotteryBackup;
+  } | null>(null);
+  const [restoreMode, setRestoreMode] = useState<'REPLACE' | 'RESTORE_MERGE'>('REPLACE');
+  const [mergeParticipantsOnRestore, setMergeParticipantsOnRestore] = useState<boolean>(true);
 
   const filteredArchives = useMemo(() => {
     return archives.filter((item) => {
@@ -613,11 +628,254 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
     showFeedback('info', 'دوره مورد نظر از بایگانی قرعه‌کشی حذف شد.');
   };
 
+  const handleRestoreArchiveToWorkspace = (arch: ArchivedLotteryRound) => {
+    const restoredPool =
+      arch.allParticipants.length > 0
+        ? arch.allParticipants
+        : [...arch.result.winners.map((w) => w.participant), ...arch.result.reserves.map((r) => r.participant)].map(
+            (p, idx) => ({ ...p, rowNumber: idx + 1 })
+          );
+
+    setSettings(arch.result.settings);
+    setParticipants(restoredPool);
+    setLastResult(arch.result);
+    setRestoreWorkspaceConfirmId(null);
+    setSelectedArchive(null);
+    setActiveTab('RESULTS');
+    showFeedback(
+      'success',
+      `دوره «${arch.result.settings.title}» از بایگانی به میز کار بازیافت و جایگزین شد.`
+    );
+  };
+
+  const handleJsonFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const content = String(evt.target?.result || '');
+      const parsed = parseLotteryJsonBackup(content);
+      if (!parsed.ok) {
+        showFeedback('error', parsed.error);
+        return;
+      }
+
+      const hasExistingData =
+        participants.length > 0 || lastResult !== null || archives.length > 0;
+      setRestoreMode(hasExistingData ? 'RESTORE_MERGE' : 'REPLACE');
+      setMergeParticipantsOnRestore(participants.length === 0);
+      setPendingJsonBackup({
+        fileName: file.name,
+        data: parsed.data,
+      });
+    };
+    reader.onerror = () => {
+      showFeedback('error', 'خطا در خواندن فایل پشتیبان انتخاب‌شده.');
+    };
+    reader.readAsText(file, 'utf-8');
+    e.target.value = '';
+  };
+
+  const handleApplyJsonBackup = () => {
+    if (!pendingJsonBackup) return;
+    const { data } = pendingJsonBackup;
+
+    const buildFallbackParticipants = (
+      res: LotteryDrawResult,
+      pool: LotteryParticipant[]
+    ): LotteryParticipant[] => {
+      if (pool.length > 0) return pool;
+      const seen = new Set<string>();
+      const combined: LotteryParticipant[] = [];
+      [...res.winners, ...res.reserves].forEach((entry) => {
+        const key = `${entry.participant.identifierType}:${entry.participant.identifierCode}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          combined.push({ ...entry.participant, rowNumber: combined.length + 1 });
+        }
+      });
+      return combined;
+    };
+
+    if (restoreMode === 'REPLACE') {
+      if (data.kind === 'FULL_PANEL') {
+        setSettings(data.settings);
+        setParticipants(data.participants);
+        setLastResult(data.lastResult);
+        saveAllLotteryArchives(data.archives);
+        setArchives(data.archives);
+        setSelectedArchive(null);
+        setPendingJsonBackup(null);
+        setActiveTab(data.lastResult ? 'RESULTS' : 'ARCHIVE');
+        showFeedback(
+          'success',
+          `پشتیبان کامل جایگزین شد (${toPersianDigits(data.archives.length)} دوره بایگانی و ${toPersianDigits(
+            data.participants.length
+          )} شرکت‌کننده).`
+        );
+        return;
+      }
+
+      // Single-round replace
+      const restoredPool = buildFallbackParticipants(data.result, data.allParticipants);
+      const existingArch = archives.find((a) => a.result.id === data.result.id);
+      const archEntry: ArchivedLotteryRound = existingArch
+        ? {
+            ...existingArch,
+            result: data.result,
+            allParticipants: restoredPool,
+          }
+        : {
+            id: `LOT-ARCH-${Date.now()}`,
+            archivedAt: data.result.drawnAt || new Date().toISOString(),
+            persianArchivedDate: data.result.persianDrawnAt || formatJalali(new Date(), true),
+            result: data.result,
+            allParticipants: restoredPool,
+            notes: data.result.settings.notes || '',
+          };
+
+      const updatedArchives = saveLotteryArchive(archEntry);
+      setArchives(updatedArchives);
+      setSettings(data.result.settings);
+      setParticipants(restoredPool);
+      setLastResult(data.result);
+      setSelectedArchive(null);
+      setPendingJsonBackup(null);
+      setActiveTab('RESULTS');
+      showFeedback(
+        'success',
+        `اطلاعات فعلی با دوره «${data.result.settings.title}» جایگزین و بازیابی شد.`
+      );
+      return;
+    }
+
+    // RESTORE_MERGE mode: keep existing archives & merge new ones
+    if (data.kind === 'FULL_PANEL') {
+      const existingByResultId = new Map(archives.map((a) => [a.result.id, a]));
+      let addedArchivesCount = 0;
+      const mergedArchives = [...archives];
+
+      data.archives.forEach((incoming) => {
+        if (!existingByResultId.has(incoming.result.id)) {
+          mergedArchives.push(incoming);
+          existingByResultId.set(incoming.result.id, incoming);
+          addedArchivesCount++;
+        }
+      });
+
+      mergedArchives.sort(
+        (a, b) => new Date(b.archivedAt).getTime() - new Date(a.archivedAt).getTime()
+      );
+      saveAllLotteryArchives(mergedArchives);
+      setArchives(mergedArchives);
+
+      let addedParticipantsCount = 0;
+      if (mergeParticipantsOnRestore && data.participants.length > 0) {
+        const existingKeys = new Set(
+          participants.map((p) => `${p.identifierType}:${p.identifierCode}`)
+        );
+        const toAdd: LotteryParticipant[] = [];
+        data.participants.forEach((p) => {
+          const key = `${p.identifierType}:${p.identifierCode}`;
+          if (!existingKeys.has(key)) {
+            existingKeys.add(key);
+            toAdd.push({
+              ...p,
+              rowNumber: participants.length + toAdd.length + 1,
+            });
+          }
+        });
+        if (toAdd.length > 0) {
+          setParticipants((prev) => [...prev, ...toAdd]);
+          addedParticipantsCount = toAdd.length;
+        }
+      }
+
+      if (!lastResult && data.lastResult) {
+        setLastResult(data.lastResult);
+      }
+
+      setPendingJsonBackup(null);
+      setActiveTab('ARCHIVE');
+      showFeedback(
+        'success',
+        `بازیافت و ادغام انجام شد: ${toPersianDigits(addedArchivesCount)} دوره جدید به بایگانی${
+          addedParticipantsCount > 0
+            ? ` و ${toPersianDigits(addedParticipantsCount)} شرکت‌کننده جدید به فهرست`
+            : ''
+        } اضافه شد.`
+      );
+      return;
+    }
+
+    // Single-round RESTORE_MERGE
+    const restoredPool = buildFallbackParticipants(data.result, data.allParticipants);
+    const alreadyArchived = archives.some((a) => a.result.id === data.result.id);
+    if (!alreadyArchived) {
+      const archEntry: ArchivedLotteryRound = {
+        id: `LOT-ARCH-${Date.now()}`,
+        archivedAt: data.result.drawnAt || new Date().toISOString(),
+        persianArchivedDate: data.result.persianDrawnAt || formatJalali(new Date(), true),
+        result: data.result,
+        allParticipants: restoredPool,
+        notes: data.result.settings.notes || '',
+      };
+      const updated = saveLotteryArchive(archEntry);
+      setArchives(updated);
+    }
+
+    let addedParticipantsCount = 0;
+    if (mergeParticipantsOnRestore && restoredPool.length > 0) {
+      const existingKeys = new Set(
+        participants.map((p) => `${p.identifierType}:${p.identifierCode}`)
+      );
+      const toAdd: LotteryParticipant[] = [];
+      restoredPool.forEach((p) => {
+        const key = `${p.identifierType}:${p.identifierCode}`;
+        if (!existingKeys.has(key)) {
+          existingKeys.add(key);
+          toAdd.push({
+            ...p,
+            rowNumber: participants.length + toAdd.length + 1,
+          });
+        }
+      });
+      if (toAdd.length > 0) {
+        setParticipants((prev) => [...prev, ...toAdd]);
+        addedParticipantsCount = toAdd.length;
+      }
+    }
+
+    if (!lastResult) {
+      setLastResult(data.result);
+    }
+
+    setPendingJsonBackup(null);
+    setActiveTab('ARCHIVE');
+    showFeedback(
+      'success',
+      `دوره «${data.result.settings.title}» با موفقیت در بایگانی بازیابی شد${
+        addedParticipantsCount > 0
+          ? ` و ${toPersianDigits(addedParticipantsCount)} شرکت‌کننده جدید افزوده شد`
+          : ''
+      }.`
+    );
+  };
+
   return (
     <div
       className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-amber-500 selection:text-slate-950"
       dir="rtl"
     >
+      {/* Hidden JSON Backup File Picker shared across tabs */}
+      <input
+        ref={jsonBackupFileRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={handleJsonFileSelect}
+      />
       {/* Dedicated Top Bar (Strictly 3 zones: Brand wordmark, Nav links, Primary back/fullscreen action) */}
       <header className="bg-slate-900/95 border-b border-slate-800 sticky top-0 z-40 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-4 sm:gap-8">
@@ -1298,6 +1556,15 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                   <Sparkles className="w-4 h-4" />
                   <span>بارگذاری فهرست نمونه</span>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => jsonBackupFileRef.current?.click()}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors"
+                >
+                  <FileJson className="w-4 h-4" />
+                  <span>بازیابی از فایل (.json)</span>
+                </button>
               </div>
             </div>
 
@@ -1611,6 +1878,15 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
 
                     <button
                       type="button"
+                      onClick={() => jsonBackupFileRef.current?.click()}
+                      className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors"
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span>دریافت و بازیابی (.json)</span>
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={handleSaveManualArchive}
                       className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors"
                     >
@@ -1782,14 +2058,24 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                     ابتدا از بخش «اجرای قرعه‌کشی و تنظیمات» قرعه‌کشی را اجرا کنید تا خروجی‌های اکسل و صورتجلسه چاپی ایجاد شوند.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('DRAW')}
-                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs inline-flex items-center gap-1.5"
-                >
-                  <Play className="w-4 h-4" />
-                  <span>رفتن به صفحه اجرای قرعه‌کشی</span>
-                </button>
+                <div className="flex items-center justify-center gap-2.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('DRAW')}
+                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs inline-flex items-center gap-1.5"
+                  >
+                    <Play className="w-4 h-4" />
+                    <span>رفتن به صفحه اجرای قرعه‌کشی</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => jsonBackupFileRef.current?.click()}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 font-bold text-xs inline-flex items-center gap-1.5"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>بازیابی از فایل پشتیبان (.json)</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -1811,8 +2097,35 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                 </p>
               </div>
 
-              <div className="text-xs text-slate-300 font-mono tabular-nums">
-                مجموع دوره‌های ثبت‌شده: <strong className="text-amber-400">{toPersianDigits(archives.length)} دوره</strong>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <div className="text-xs text-slate-300 font-mono tabular-nums ml-2">
+                  مجموع دوره‌های ثبت‌شده: <strong className="text-amber-400">{toPersianDigits(archives.length)} دوره</strong>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadFullLotteryJsonBackup({
+                      settings,
+                      participants,
+                      lastResult,
+                      archives,
+                    })
+                  }
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors"
+                >
+                  <Download className="w-4 h-4 text-emerald-400" />
+                  <span>پشتیبان کامل کل دوره‌ها (.json)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => jsonBackupFileRef.current?.click()}
+                  className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors"
+                >
+                  <Upload className="w-4 h-4" />
+                  <span>دریافت فایل و بازیابی (.json)</span>
+                </button>
               </div>
             </div>
 
@@ -1945,6 +2258,35 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                             <Download className="w-3.5 h-3.5 text-sky-400" />
                             <span>پشتیبان (.json)</span>
                           </button>
+
+                          {restoreWorkspaceConfirmId !== arch.id ? (
+                            <button
+                              type="button"
+                              onClick={() => setRestoreWorkspaceConfirmId(arch.id)}
+                              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />
+                              <span>بازیافت به میز کار</span>
+                            </button>
+                          ) : (
+                            <div className="flex items-center gap-1.5 bg-emerald-950/60 border border-emerald-700 rounded-xl px-2.5 py-1.5 text-xs">
+                              <span className="text-emerald-200">جایگزینی میز کار؟</span>
+                              <button
+                                type="button"
+                                onClick={() => handleRestoreArchiveToWorkspace(arch)}
+                                className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold"
+                              >
+                                بله
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setRestoreWorkspaceConfirmId(null)}
+                                className="px-1.5 py-0.5 text-slate-300"
+                              >
+                                لغو
+                              </button>
+                            </div>
+                          )}
                         </div>
 
                         <div>
@@ -1983,16 +2325,28 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                 })}
               </div>
             ) : (
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center space-y-3">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center space-y-4">
                 <Archive className="w-10 h-10 text-slate-600 mx-auto" />
-                <h3 className="text-sm font-bold text-white">
-                  {archiveSearch
-                    ? 'موردی مطابق جستجوی شما یافت نشد'
-                    : 'هنوز دوره قرعه‌کشی در بایگانی ذخیره نشده است'}
-                </h3>
-                <p className="text-xs text-slate-400 max-w-md mx-auto">
-                  پس از پایان هر دوره قرعه‌کشی، نتایج به صورت خودکار به همراه لیست شرکت‌کنندگان در این بخش بایگانی می‌شوند.
-                </p>
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold text-white">
+                    {archiveSearch
+                      ? 'موردی مطابق جستجوی شما یافت نشد'
+                      : 'هنوز دوره قرعه‌کشی در بایگانی ذخیره نشده است'}
+                  </h3>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                    پس از پایان هر دوره قرعه‌کشی، نتایج به صورت خودکار ذخیره می‌شوند؛ همچنین می‌توانید از فایل پشتیبان JSON دوره‌های قبلی را بازیابی کنید.
+                  </p>
+                </div>
+                {!archiveSearch && (
+                  <button
+                    type="button"
+                    onClick={() => jsonBackupFileRef.current?.click()}
+                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold inline-flex items-center gap-1.5"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>دریافت فایل پشتیبان و بازیابی (.json)</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -2169,7 +2523,7 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
             </div>
 
             <div className="p-4 border-t border-slate-800 flex items-center justify-between gap-3 flex-wrap">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
                   onClick={() =>
@@ -2196,6 +2550,14 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
                 >
                   <Printer className="w-4 h-4" />
                   <span>چاپ صورتجلسه</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRestoreArchiveToWorkspace(selectedArchive)}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 text-xs font-bold flex items-center gap-1.5"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>بازیافت به میز کار</span>
                 </button>
               </div>
 
@@ -2283,6 +2645,184 @@ export const LotteryPanel: React.FC<LotteryPanelProps> = ({ onSwitchToElection }
               >
                 <Play className="w-3.5 h-3.5 fill-current" />
                 <span>بله، قرعه‌کشی شروع شود</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* JSON Backup Import / Replace / Restore Modal */}
+      {pendingJsonBackup && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-xl w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2 text-white font-black text-sm">
+                <FileJson className="w-5 h-5 text-sky-400" />
+                <span>دریافت، جایگزینی و بازیافت فایل پشتیبان (.json)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPendingJsonBackup(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* File summary */}
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-400">نام فایل:</span>
+                <span className="font-mono text-sky-300 truncate max-w-xs" dir="ltr">
+                  {pendingJsonBackup.fileName}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-400">نوع پشتیبان:</span>
+                <strong className="text-white">
+                  {pendingJsonBackup.data.kind === 'FULL_PANEL'
+                    ? 'پشتیبان کامل سامانه قرعه‌کشی و بایگانی'
+                    : 'پشتیبان یک دوره قرعه‌کشی'}
+                </strong>
+              </div>
+              {pendingJsonBackup.data.kind === 'SINGLE_ROUND' ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 font-mono tabular-nums">
+                  <div>
+                    <span className="text-slate-500 block text-[11px]">عنوان دوره</span>
+                    <strong className="text-white font-sans">
+                      {pendingJsonBackup.data.result.settings.title}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[11px]">برندگان / علی‌البدل</span>
+                    <strong className="text-emerald-400">
+                      {toPersianDigits(pendingJsonBackup.data.result.winners.length)} /{' '}
+                      {toPersianDigits(pendingJsonBackup.data.result.reserves.length)} نفر
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[11px]">کل شرکت‌کنندگان</span>
+                    <strong className="text-amber-400">
+                      {toPersianDigits(pendingJsonBackup.data.allParticipants.length)} نفر
+                    </strong>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 font-mono tabular-nums">
+                  <div>
+                    <span className="text-slate-500 block text-[11px]">دوره‌های بایگانی</span>
+                    <strong className="text-amber-400">
+                      {toPersianDigits(pendingJsonBackup.data.archives.length)} دوره
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[11px]">شرکت‌کنندگان</span>
+                    <strong className="text-emerald-400">
+                      {toPersianDigits(pendingJsonBackup.data.participants.length)} نفر
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[11px]">نتیجه فعال</span>
+                    <strong className="text-sky-400">
+                      {pendingJsonBackup.data.lastResult ? 'دارد' : 'ندارد'}
+                    </strong>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Mode selection */}
+            <div className="space-y-2.5 text-xs">
+              <label
+                className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-colors ${
+                  restoreMode === 'RESTORE_MERGE'
+                    ? 'bg-emerald-950/35 border-emerald-500/50'
+                    : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="lotteryJsonRestoreMode"
+                  checked={restoreMode === 'RESTORE_MERGE'}
+                  onChange={() => setRestoreMode('RESTORE_MERGE')}
+                  className="mt-0.5 accent-emerald-500"
+                />
+                <div className="space-y-1">
+                  <div className="font-bold text-white flex items-center gap-1.5">
+                    <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>بازیافت و افزودن به بایگانی (بدون حذف اطلاعات فعلی)</span>
+                  </div>
+                  <p className="text-slate-400 leading-relaxed">
+                    دوره‌های موجود در فایل به بایگانی اضافه می‌شوند و سوابق فعلی شما حفظ می‌گردد.
+                  </p>
+                </div>
+              </label>
+
+              {restoreMode === 'RESTORE_MERGE' && (
+                <label className="flex items-center gap-2 pr-3 text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={mergeParticipantsOnRestore}
+                    onChange={(e) => setMergeParticipantsOnRestore(e.target.checked)}
+                    className="accent-emerald-500"
+                  />
+                  <span>
+                    افراد غیرتکراری داخل فایل به فهرست شرکت‌کنندگان فعلی نیز اضافه شوند
+                  </span>
+                </label>
+              )}
+
+              <label
+                className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-colors ${
+                  restoreMode === 'REPLACE'
+                    ? 'bg-amber-950/35 border-amber-500/50'
+                    : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="lotteryJsonRestoreMode"
+                  checked={restoreMode === 'REPLACE'}
+                  onChange={() => setRestoreMode('REPLACE')}
+                  className="mt-0.5 accent-amber-500"
+                />
+                <div className="space-y-1">
+                  <div className="font-bold text-white flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                    <span>جایگزینی کامل داده‌های فعلی با فایل پشتیبان</span>
+                  </div>
+                  <p className="text-slate-400 leading-relaxed">
+                    {pendingJsonBackup.data.kind === 'FULL_PANEL'
+                      ? 'کل تنظیمات، فهرست شرکت‌کنندگان، نتیجه فعال و بایگانی فعلی با محتوای این فایل جایگزین می‌شوند.'
+                      : 'تنظیمات، شرکت‌کنندگان و نتیجه فعال فعلی با اطلاعات این دوره جایگزین شده و دوره در بایگانی ثبت می‌گردد.'}
+                  </p>
+                </div>
+              </label>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setPendingJsonBackup(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-colors"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyJsonBackup}
+                className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  restoreMode === 'REPLACE'
+                    ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                    : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                }`}
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>
+                  {restoreMode === 'REPLACE'
+                    ? 'تأیید و جایگزینی کامل'
+                    : 'تأیید و بازیافت'}
+                </span>
               </button>
             </div>
           </div>
